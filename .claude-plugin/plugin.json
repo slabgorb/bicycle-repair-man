@@ -1,0 +1,8 @@
+{
+  "name": "brm",
+  "description": "Role-bounded slash commands (TEA, Dev, Reviewer, Architect, PM, Tech Writer) with per-role persistent sidecar memory. Companion to superpowers and zeitgoose.",
+  "version": "0.1.0",
+  "author": { "name": "Keith Avery", "email": "slabgorbai@gmail.com" },
+  "license": "Apache-2.0",
+  "keywords": ["roles", "agents", "memory", "superpowers", "pennyfarthing"]
+}
