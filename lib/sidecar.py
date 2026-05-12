@@ -85,3 +85,32 @@ def load_sidecar(
 
     inner = "\n".join(parts)
     return f'<brm-sidecar role="{role}">\n{inner}\n</brm-sidecar>\n'
+
+
+def recognized_tokens() -> frozenset[str]:
+    """The set of leading tokens BRM will react to."""
+    out: set[str] = set()
+    for role in ROLES:
+        out.add(f"/{role}")
+        out.add(f"/brm:{role}")
+    return frozenset(out)
+
+
+_RECOGNIZED = recognized_tokens()
+_TOKEN_TO_ROLE: dict[str, str] = {
+    **{f"/{r}": r for r in ROLES},
+    **{f"/brm:{r}": r for r in ROLES},
+}
+
+
+def extract_command(prompt: str) -> str | None:
+    """Return the leading whitespace-stripped slash token, or None."""
+    stripped = prompt.lstrip()
+    if not stripped.startswith("/"):
+        return None
+    return stripped.split(maxsplit=1)[0]
+
+
+def role_for_token(token: str) -> str | None:
+    """Map an exact slash-token to a role name, or None if unrecognized."""
+    return _TOKEN_TO_ROLE.get(token)
