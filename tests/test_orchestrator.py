@@ -154,3 +154,64 @@ def test_find_orchestrator_root_ignores_dir_named_repos_yaml(tmp_path: Path) -> 
     (tmp_path / ".brm").mkdir()
     (tmp_path / ".brm" / "repos.yaml").mkdir()
     assert orchestrator.find_orchestrator_root(tmp_path) is None
+
+
+# --- cwd_repo -------------------------------------------------------------
+
+def _make_repos(spec: dict[str, str]) -> dict[str, orchestrator.RepoConfig]:
+    """Build a tiny repos map for cwd_repo testing. spec = {name: path}."""
+    return {
+        name: orchestrator.RepoConfig(
+            name=name,
+            path=path,
+            type="x",
+            default_branch="main",
+            test_command="",
+            lint_command="",
+        )
+        for name, path in spec.items()
+    }
+
+
+def test_cwd_repo_matches_when_cwd_inside_declared_path(tmp_path: Path) -> None:
+    orch = tmp_path
+    (orch / "api").mkdir()
+    cwd = orch / "api" / "src"
+    cwd.mkdir()
+    repos = _make_repos({"api": "api", "ui": "ui"})
+    assert orchestrator.cwd_repo(cwd, orch, repos) == "api"
+
+
+def test_cwd_repo_matches_at_repo_root(tmp_path: Path) -> None:
+    orch = tmp_path
+    (orch / "ui").mkdir()
+    repos = _make_repos({"ui": "ui"})
+    assert orchestrator.cwd_repo(orch / "ui", orch, repos) == "ui"
+
+
+def test_cwd_repo_none_when_cwd_outside_declared_paths(tmp_path: Path) -> None:
+    orch = tmp_path
+    (orch / "api").mkdir()
+    repos = _make_repos({"api": "api"})
+    other = orch / "scratch"
+    other.mkdir()
+    assert orchestrator.cwd_repo(other, orch, repos) is None
+
+
+def test_cwd_repo_path_dot_matches_orchestrator_root(tmp_path: Path) -> None:
+    orch = tmp_path
+    repos = _make_repos({"orch": ".", "api": "api"})
+    (orch / "api").mkdir()
+    # cwd at orch root
+    assert orchestrator.cwd_repo(orch, orch, repos) == "orch"
+    # cwd inside api should still match api, not orch (closest ancestor wins)
+    assert orchestrator.cwd_repo(orch / "api", orch, repos) == "api"
+
+
+def test_cwd_repo_nested_paths_closest_wins(tmp_path: Path) -> None:
+    orch = tmp_path
+    (orch / "x" / "y").mkdir(parents=True)
+    repos = _make_repos({"outer": "x", "inner": "x/y"})
+    cwd = orch / "x" / "y" / "deep"
+    cwd.mkdir()
+    assert orchestrator.cwd_repo(cwd, orch, repos) == "inner"

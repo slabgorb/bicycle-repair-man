@@ -98,3 +98,31 @@ def find_orchestrator_root(cwd: Path) -> Path | None:
             return None
         current = current.parent
     return None
+
+
+def cwd_repo(
+    cwd: Path,
+    orchestrator_root: Path,
+    repos: dict[str, "RepoConfig"],
+) -> str | None:
+    """Return the short-name of the repo whose declared `path` contains `cwd`, else None.
+
+    Closest-ancestor wins when paths nest. A repo with `path: .` matches the
+    orchestrator root itself (lowest priority — any other repo containing cwd wins).
+    """
+    cwd_abs = Path(cwd).resolve()
+    orch_abs = Path(orchestrator_root).resolve()
+
+    # Build (repo_root_abs, name) pairs.
+    candidates: list[tuple[Path, str]] = []
+    for name, repo in repos.items():
+        repo_root = (orch_abs / repo.path).resolve()
+        candidates.append((repo_root, name))
+
+    # Sort by path length descending so the most specific match comes first.
+    candidates.sort(key=lambda pair: len(str(pair[0])), reverse=True)
+
+    for repo_root, name in candidates:
+        if cwd_abs == repo_root or repo_root in cwd_abs.parents:
+            return name
+    return None
