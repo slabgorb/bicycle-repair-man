@@ -20,7 +20,7 @@ BRM keeps the *engine*, not the *fleet management*.
 
 ## Current state
 
-The repo is freshly initialized — no commits, no source files yet, no build/test commands. Do not invent a build pipeline; ask the user before scaffolding one.
+v0.1.0 implementation in progress per `docs/superpowers/plans/2026-05-12-brm-v0.1.0-implementation.md`. The design spec at `docs/superpowers/specs/2026-05-12-brm-design.md` is the contract. Tests run via `python3 -m pytest -v` from the repo root; no other build pipeline.
 
 ## Source repos to reference
 
