@@ -308,3 +308,47 @@ def test_complete_rejected_when_phases_pending(orch: Path):
     r = _run(["complete", str(design_path)], cwd=orch)
     assert r.returncode == 1
     assert "complete" in r.stderr.lower()
+
+
+def test_list_filters_by_status(orch: Path):
+    _run(["init", "l1", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    _run(["init", "l2", "--workflow", "tdd", "--repos", "ui"], cwd=orch)
+    # Mark l1 as planned (not in-progress).
+    p1 = next((orch / "docs" / "superpowers" / "designs").glob("*-l1.md"))
+    p1.write_text(p1.read_text().replace("status: in-progress", "status: planned", 1))
+    r = _run(["list", "--status", "in-progress"], cwd=orch)
+    assert r.returncode == 0
+    assert "l2" in r.stdout
+    assert "l1" not in r.stdout
+
+
+def test_list_filters_by_repo(orch: Path):
+    _run(["init", "r1", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    _run(["init", "r2", "--workflow", "tdd", "--repos", "ui"], cwd=orch)
+    r = _run(["list", "--repo", "ui"], cwd=orch)
+    assert r.returncode == 0
+    assert "r2" in r.stdout
+    assert "r1" not in r.stdout
+
+
+def test_list_json(orch: Path):
+    _run(["init", "j1", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    r = _run(["list", "--json"], cwd=orch)
+    assert r.returncode == 0
+    arr = json.loads(r.stdout)
+    assert isinstance(arr, list)
+    assert any("j1" in item.get("design", "") for item in arr)
+
+
+def test_validate_clean(orch: Path):
+    _run(["init", "v1", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    p = next((orch / "docs" / "superpowers" / "designs").glob("*-v1.md"))
+    r = _run(["validate", str(p)], cwd=orch)
+    assert r.returncode == 0
+
+
+def test_validate_corrupt(orch: Path, tmp_path: Path):
+    bad = tmp_path / "bad.md"
+    bad.write_text("not a design\n")
+    r = _run(["validate", str(bad)], cwd=orch)
+    assert r.returncode == 1

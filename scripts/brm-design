@@ -510,13 +510,65 @@ def cmd_abandon(args) -> int:
 
 
 def cmd_list(args) -> int:
-    print("brm-design list: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    base = _designs_dir(cwd)
+    if not base.is_dir():
+        if args.json:
+            print("[]")
+        return EXIT_OK
+
+    rows: list[dict] = []
+    for p in sorted(base.glob("*.md")):
+        try:
+            d = _read_design(p)
+        except _design.DesignSchemaError:
+            continue
+        if args.status and d.status != args.status:
+            continue
+        if args.repo and args.repo not in d.repos:
+            continue
+        rows.append({
+            "path": str(p),
+            "design": d.design,
+            "workflow": d.workflow,
+            "repos": d.repos,
+            "status": d.status,
+            "current_phase": d.current_phase,
+        })
+
+    if args.json:
+        import json as _json
+        print(_json.dumps(rows, indent=2))
+        return EXIT_OK
+    for r in rows:
+        print(f"{r['status']:>12}  {r['design']:<32}  {r['workflow']:<8}  "
+              f"repos={','.join(r['repos'])}  current={r['current_phase']}")
+    return EXIT_OK
 
 
 def cmd_validate(args) -> int:
-    print("brm-design validate: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    path = Path(args.design_path).resolve()
+    try:
+        d = _read_design(path)
+    except _design.DesignSchemaError as e:
+        print(f"brm-design validate: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
+
+    # Anchor consistency: each phases[].handoff must point to a body anchor.
+    for p in d.phases:
+        if p.handoff:
+            anchor = p.handoff.lstrip("#")
+            needle = f"{{#{anchor}}}"
+            if needle not in d.body:
+                print(
+                    f"brm-design validate: phase '{p.name}' handoff anchor "
+                    f"'{p.handoff}' missing from body",
+                    file=sys.stderr,
+                )
+                return EXIT_RUNTIME
+
+    print(f"valid: {path}")
+    return EXIT_OK
 
 
 _DISPATCH = {
