@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,9 @@ def _run_hook(
     prompt: str,
     *,
     home: Path,
-    project_root: Path | None,
+    project_root: Path | None = None,
+    cwd: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> dict:
     env = {
         **os.environ,
@@ -27,7 +30,12 @@ def _run_hook(
         env["BRM_PROJECT_ROOT"] = str(project_root)
     else:
         env.pop("BRM_PROJECT_ROOT", None)
-    event = json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": prompt})
+    if extra_env:
+        env.update(extra_env)
+    event_obj = {"hook_event_name": "UserPromptSubmit", "prompt": prompt}
+    if cwd is not None:
+        event_obj["cwd"] = str(cwd)
+    event = json.dumps(event_obj)
     proc = subprocess.run(
         ["python3", str(HOOK_SCRIPT)],
         input=event,
@@ -259,3 +267,69 @@ def test_orchestrator_no_orch_root_falls_back_to_v01_behavior(tmp_path: Path) ->
     assert "<brm-orchestrator" not in ctx
     assert '<brm-sidecar role="reviewer">' in ctx
     assert '<layer scope="orchestrator"' not in ctx
+
+
+# --- Design block scenarios ----------------------------------------------
+
+DESIGN_FIXTURE = textwrap.dedent("""\
+    ---
+    design: 2026-05-12-cache-fix
+    created: 2026-05-12T14:22:00-04:00
+    workflow: tdd
+    repos: [api]
+    description: ""
+    status: in-progress
+    current_phase: red-api
+    phases:
+      - {name: red-api, repo: api, status: in-progress, started: null, finished: null, handoff: null, gate_result: null}
+      - {name: green-api, repo: api, status: planned, started: null, finished: null, handoff: null, gate_result: null}
+    history: []
+    ---
+
+    # body
+
+    ## Handoffs
+""")
+
+
+def test_hook_emits_brm_design_when_in_progress(tmp_path):
+    orch = tmp_path / "orch"
+    (orch / ".brm").mkdir(parents=True)
+    (orch / ".brm" / "repos.yaml").write_text(
+        "repos:\n  api:\n    path: api\n    type: api\n"
+        "    default_branch: main\n    test_command: pytest\n    lint_command: ruff check\n"
+    )
+    (orch / "api" / ".git").mkdir(parents=True)
+    designs = orch / "docs" / "superpowers" / "designs"
+    designs.mkdir(parents=True)
+    (designs / "2026-05-12-cache-fix.md").write_text(DESIGN_FIXTURE)
+
+    out = _run_hook(prompt="/dev cache fix",
+                    home=tmp_path / "home",
+                    cwd=orch / "api",
+                    extra_env={"BRM_ACTIVE_DESIGN": str(designs / "2026-05-12-cache-fix.md")})
+    ctx = _additional(out)
+    assert "<brm-design" in ctx
+    assert 'current-phase="red-api"' in ctx
+    assert "<brm-orchestrator" in ctx  # still emits
+
+
+def test_hook_drops_brm_design_when_complete(tmp_path):
+    orch = tmp_path / "orch"
+    (orch / ".brm").mkdir(parents=True)
+    (orch / ".brm" / "repos.yaml").write_text(
+        "repos:\n  api:\n    path: api\n    type: api\n"
+        "    default_branch: main\n    test_command: pytest\n    lint_command: ruff check\n"
+    )
+    (orch / "api" / ".git").mkdir(parents=True)
+    designs = orch / "docs" / "superpowers" / "designs"
+    designs.mkdir(parents=True)
+    (designs / "done.md").write_text(DESIGN_FIXTURE.replace("status: in-progress", "status: complete"))
+
+    out = _run_hook(prompt="/dev x",
+                    home=tmp_path / "home",
+                    cwd=orch / "api",
+                    extra_env={"BRM_ACTIVE_DESIGN": str(designs / "done.md")})
+    ctx = _additional(out)
+    assert "<brm-design" not in ctx
+    assert "<brm-orchestrator" in ctx
