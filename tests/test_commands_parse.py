@@ -15,6 +15,7 @@ REQUIRED_H2_SECTIONS = [
     "## What you don't do",
     "## Skills you invoke",
     "## Orchestrator awareness",
+    "## Design awareness",
     "## Sidecar protocol",
     "## Memory boundary",
     "## Handing off",
@@ -22,7 +23,7 @@ REQUIRED_H2_SECTIONS = [
 
 FORBIDDEN_TOKENS = ("TODO", "TBD", "FIXME", "XXX")
 
-WORD_BUDGET_MAX = 900  # ~1100 tokens; absorbs the orchestrator awareness addendum
+WORD_BUDGET_MAX = 1100  # ~1350 tokens; absorbs orchestrator + design awareness addenda
 WORD_BUDGET_MIN = 200
 
 
