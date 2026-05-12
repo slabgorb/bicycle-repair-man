@@ -198,3 +198,16 @@ def test_expand_rejects_empty_repos(tmp_path: Path):
     wf = load_workflow("tdd", plugin_root=tmp_path)
     with pytest.raises(WorkflowSchemaError, match="empty"):
         expand_phases(wf, [])
+
+
+def test_builtin_workflows_load():
+    """All shipped workflows must load against the real plugin root."""
+    plugin_root = Path(__file__).resolve().parents[1]
+    for name in ("tdd", "patch", "docs", "architecture"):
+        wf = load_workflow(name, plugin_root=plugin_root)
+        assert wf.name == name
+        assert wf.phases, f"{name} has no phases"
+        # All built-ins must end with a finish phase owned by pm.
+        last = wf.phases[-1]
+        assert last.name == "finish"
+        assert last.agent == "pm"
