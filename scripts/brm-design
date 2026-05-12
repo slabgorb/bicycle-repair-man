@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""BRM v0.3 design CLI — manages workflow state across one or more repos.
+
+All subcommands operate on a design file (markdown + YAML frontmatter at
+docs/superpowers/designs/*.md). The plugin never invokes external binaries:
+gate evaluation runs in-session via the Task tool; this script only does file
+I/O and templating.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PLUGIN_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PLUGIN_ROOT))
+
+from lib import design as _design       # noqa: E402
+from lib import gate as _gate           # noqa: E402
+from lib import orchestrator as _orch   # noqa: E402
+from lib import workflow as _workflow   # noqa: E402
+
+EXIT_OK = 0
+EXIT_RUNTIME = 1
+EXIT_USAGE = 2
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="brm-design", description=__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    init = sub.add_parser("init", help="Create a new design")
+    init.add_argument("slug")
+    init.add_argument("--workflow", required=True)
+    init.add_argument("--repos", default=None, help="comma-separated short-names")
+    init.add_argument("--description", default="")
+    init.add_argument("--force", action="store_true")
+
+    status = sub.add_parser("status", help="Show current design state")
+    status.add_argument("design_path", nargs="?", default=None)
+    status.add_argument("--json", action="store_true")
+
+    handoff = sub.add_parser("handoff", help="Record a phase handoff")
+    handoff.add_argument("design_path")
+    handoff.add_argument("--from", dest="from_phase", required=True)
+    handoff.add_argument("--to", dest="to_phase", required=True)
+    src = handoff.add_mutually_exclusive_group(required=True)
+    src.add_argument("--file", default=None)
+    src.add_argument("--stdin", action="store_true")
+
+    gate_p = sub.add_parser("gate", help="Emit gate prompt for the current phase")
+    gate_p.add_argument("design_path")
+
+    record = sub.add_parser("record-gate", help="Persist a GATE_RESULT")
+    record.add_argument("design_path")
+    src = record.add_mutually_exclusive_group(required=True)
+    src.add_argument("--result-file", default=None)
+    src.add_argument("--result-stdin", action="store_true")
+
+    advance = sub.add_parser("advance", help="Advance to the next phase")
+    advance.add_argument("design_path")
+    advance.add_argument("--to", required=True)
+    advance.add_argument("--force", action="store_true")
+
+    for name in ("block", "unblock", "complete", "abandon"):
+        s = sub.add_parser(name, help=f"{name} a design")
+        s.add_argument("design_path")
+        if name in ("block", "abandon"):
+            s.add_argument("--reason", required=True)
+
+    lst = sub.add_parser("list", help="List designs")
+    lst.add_argument("--status", default=None)
+    lst.add_argument("--repo", default=None)
+    lst.add_argument("--json", action="store_true")
+
+    val = sub.add_parser("validate", help="Validate a design file")
+    val.add_argument("design_path")
+
+    return p
+
+
+def _now_iso() -> str:
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _read_design(path: Path) -> _design.Design:
+    text = path.read_text(encoding="utf-8")
+    return _design.parse_design_text(text)
+
+
+def _write_design_atomic(d: _design.Design, path: Path) -> None:
+    text = _design.serialize_design(d)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _designs_dir(cwd: Path) -> Path:
+    override = os.environ.get("BRM_DESIGNS_DIR")
+    if override:
+        return Path(override)
+    orch = _orch.find_orchestrator_root(cwd)
+    base = orch if orch else cwd
+    return base / "docs" / "superpowers" / "designs"
+
+
+def _resolve_design_path(arg: str | None, cwd: Path) -> Path:
+    if arg:
+        return Path(arg).resolve()
+    env_path = os.environ.get("BRM_ACTIVE_DESIGN")
+    if env_path and Path(env_path).is_file():
+        return Path(env_path).resolve()
+    matches = _find_active_designs(cwd)
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        print("brm-design: no active design found", file=sys.stderr)
+        sys.exit(2)
+    print(
+        "brm-design: multiple active designs; set BRM_ACTIVE_DESIGN or pass a path:",
+        file=sys.stderr,
+    )
+    for m in matches:
+        print(f"  {m}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _find_active_designs(cwd: Path) -> list[Path]:
+    """Return designs with status in {in-progress, blocked} relevant to cwd."""
+    base = _designs_dir(cwd)
+    if not base.is_dir():
+        return []
+    cwd_repo_name = _cwd_repo_name(cwd)
+    out: list[Path] = []
+    for p in sorted(base.glob("*.md")):
+        try:
+            d = _read_design(p)
+        except _design.DesignSchemaError:
+            continue
+        if d.status not in ("in-progress", "blocked"):
+            continue
+        if cwd_repo_name is None or cwd_repo_name in d.repos:
+            out.append(p.resolve())
+    return out
+
+
+def _cwd_repo_name(cwd: Path) -> str | None:
+    orch = _orch.find_orchestrator_root(cwd)
+    if not orch:
+        return None
+    try:
+        repos_text = (orch / ".brm" / "repos.yaml").read_text(encoding="utf-8")
+        repos = _orch.parse_repos_yaml(repos_text)
+    except Exception:
+        return None
+    return _orch.cwd_repo(cwd, orch, repos)
+
+
+# Subcommand stubs — real implementations land in later tasks.
+
+def cmd_init(args) -> int:
+    print("brm-design init: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_status(args) -> int:
+    print("brm-design status: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_handoff(args) -> int:
+    print("brm-design handoff: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_gate(args) -> int:
+    print("brm-design gate: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_record_gate(args) -> int:
+    print("brm-design record-gate: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_advance(args) -> int:
+    print("brm-design advance: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_block(args) -> int:
+    print("brm-design block: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_unblock(args) -> int:
+    print("brm-design unblock: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_complete(args) -> int:
+    print("brm-design complete: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_abandon(args) -> int:
+    print("brm-design abandon: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_list(args) -> int:
+    print("brm-design list: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+def cmd_validate(args) -> int:
+    print("brm-design validate: not implemented yet", file=sys.stderr)
+    return EXIT_RUNTIME
+
+
+_DISPATCH = {
+    "init": cmd_init, "status": cmd_status, "handoff": cmd_handoff,
+    "gate": cmd_gate, "record-gate": cmd_record_gate, "advance": cmd_advance,
+    "block": cmd_block, "unblock": cmd_unblock, "complete": cmd_complete,
+    "abandon": cmd_abandon, "list": cmd_list, "validate": cmd_validate,
+}
+
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+    return _DISPATCH[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
