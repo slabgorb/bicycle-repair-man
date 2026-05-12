@@ -316,7 +316,11 @@ def _next_phase_name(d: _design.Design) -> str | None:
 def cmd_handoff(args) -> int:
     cwd = Path.cwd()
     path = _resolve_design_path(args.design_path, cwd)
-    d = _read_design(path)
+    try:
+        d = _read_design(path)
+    except _design.DesignSchemaError as e:
+        print(f"brm-design handoff: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
 
     if args.from_phase not in (p.name for p in d.phases):
         print(f"brm-design handoff: phase '{args.from_phase}' not in design",
@@ -358,7 +362,11 @@ def cmd_handoff(args) -> int:
 def cmd_gate(args) -> int:
     cwd = Path.cwd()
     path = _resolve_design_path(args.design_path, cwd)
-    d = _read_design(path)
+    try:
+        d = _read_design(path)
+    except _design.DesignSchemaError as e:
+        print(f"brm-design gate: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
     cur = d.current()
 
     orch = _orch.find_orchestrator_root(cwd)
@@ -472,7 +480,11 @@ def cmd_advance(args) -> int:
 def cmd_block(args) -> int:
     cwd = Path.cwd()
     path = _resolve_design_path(args.design_path, cwd)
-    d = _read_design(path)
+    try:
+        d = _read_design(path)
+    except _design.DesignSchemaError as e:
+        print(f"brm-design block: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
     _design.block_design(d, reason=args.reason, at=_now_iso())
     _write_design_atomic(d, path)
     return EXIT_OK
@@ -481,7 +493,11 @@ def cmd_block(args) -> int:
 def cmd_unblock(args) -> int:
     cwd = Path.cwd()
     path = _resolve_design_path(args.design_path, cwd)
-    d = _read_design(path)
+    try:
+        d = _read_design(path)
+    except _design.DesignSchemaError as e:
+        print(f"brm-design unblock: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
     _design.unblock_design(d, at=_now_iso())
     _write_design_atomic(d, path)
     return EXIT_OK
@@ -503,7 +519,11 @@ def cmd_complete(args) -> int:
 def cmd_abandon(args) -> int:
     cwd = Path.cwd()
     path = _resolve_design_path(args.design_path, cwd)
-    d = _read_design(path)
+    try:
+        d = _read_design(path)
+    except _design.DesignSchemaError as e:
+        print(f"brm-design abandon: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
     _design.mark_abandoned(d, reason=args.reason, at=_now_iso())
     _write_design_atomic(d, path)
     return EXIT_OK

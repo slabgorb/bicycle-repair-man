@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""BRM UserPromptSubmit hook (v0.2 — orchestrator-aware).
+"""BRM UserPromptSubmit hook (v0.3 — design-aware).
 
 Detects a leading `/role` or `/brm:role` token and injects:
   1. A `<brm-sidecar>` block with up to three sidecar layers
      (global, orchestrator, project) when present.
   2. A `<brm-orchestrator>` block with the workspace's repos.yaml content
      when an orchestrator root is detected.
+  3. A `<brm-design>` block with the active design's frontmatter and
+     previous-phase handoff when one matches the cwd.
 
 Any failure → exit 0 with empty output; missing context is far better than
 a blocked prompt.
