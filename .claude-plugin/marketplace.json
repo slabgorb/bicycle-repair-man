@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "brm",
+  "description": "BRM (Bicycle Repair Man) plugin marketplace — single-plugin self-publishing repo.",
+  "owner": {
+    "name": "Keith Avery",
+    "email": "slabgorb@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "brm",
+      "description": "Role-bounded slash commands (TEA, Dev, Reviewer, Architect, PM, Tech Writer) with per-role persistent sidecar memory, cross-repo orchestration, and v0.3 design/workflow/gate choreography. Companion to superpowers.",
+      "author": {
+        "name": "Keith Avery",
+        "email": "slabgorb@gmail.com"
+      },
+      "source": "./",
+      "homepage": "https://github.com/slabgorb/bicycle-repair-man"
+    }
+  ]
+}
