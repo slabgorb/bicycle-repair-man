@@ -67,7 +67,7 @@ def load_sidecar(
         if body is not None:
             parts.append(
                 f'  <layer scope="global" path="~/.claude/brm/sidecars/{role}.md">\n'
-                f"{body}"
+                f"{body.rstrip(chr(10))}\n"
                 f"  </layer>"
             )
 
@@ -76,7 +76,7 @@ def load_sidecar(
         if body is not None:
             parts.append(
                 f'  <layer scope="project" path=".brm/sidecars/{role}.md">\n'
-                f"{body}"
+                f"{body.rstrip(chr(10))}\n"
                 f"  </layer>"
             )
 

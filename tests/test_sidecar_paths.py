@@ -160,3 +160,15 @@ def test_load_sidecar_both_unreadable_returns_empty(tmp_path: Path, monkeypatch)
     )
     out = sidecar.load_sidecar("reviewer", home=home, project_root=proj)
     assert out == ""
+
+
+def test_load_sidecar_no_trailing_newline_in_body(tmp_path: Path) -> None:
+    """A sidecar file without a trailing newline must still produce
+    well-formed XML — the closing </layer> tag belongs on its own line."""
+    home = tmp_path / "home"
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_global(home, "reviewer", "no-trailing-newline-content")
+    out = sidecar.load_sidecar("reviewer", home=home, project_root=proj)
+    assert "no-trailing-newline-content\n  </layer>" in out
+    assert "no-trailing-newline-content  </layer>" not in out
