@@ -87,3 +87,71 @@ def test_init_from_pf_missing_source_errors(tmp_path: Path) -> None:
     proc = _run(["init", "--from-pf"], cwd=tmp_path)
     assert proc.returncode == 1
     assert "pennyfarthing" in (proc.stderr + proc.stdout).lower()
+
+
+# --- list / topology / describe / owns ------------------------------------
+
+ORCH_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "orchestrator"
+
+
+def _orch_env(orch_root: Path) -> dict:
+    return {"BRM_ORCHESTRATOR_ROOT": str(orch_root)}
+
+
+def test_list_prints_repo_names(tmp_path: Path) -> None:
+    proc = _run(["list"], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    assert proc.returncode == 0, proc.stderr
+    names = proc.stdout.split()
+    assert "api" in names and "ui" in names
+
+
+def test_list_json(tmp_path: Path) -> None:
+    proc = _run(["list", "--json"], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    data = json.loads(proc.stdout)
+    assert {r["name"] for r in data} == {"api", "ui"}
+    assert all("path" in r and "type" in r for r in data)
+
+
+def test_topology_prints_verbatim(tmp_path: Path) -> None:
+    proc = _run(["topology"], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    assert proc.returncode == 0
+    assert "test_command: pytest" in proc.stdout
+    assert "test_command: npm test" in proc.stdout
+
+
+def test_topology_json(tmp_path: Path) -> None:
+    proc = _run(["topology", "--json"], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    data = json.loads(proc.stdout)
+    assert set(data["repos"]) == {"api", "ui"}
+
+
+def test_describe_known_repo(tmp_path: Path) -> None:
+    proc = _run(["describe", "api"], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    assert proc.returncode == 0
+    assert "test_command: pytest" in proc.stdout
+
+
+def test_describe_unknown_repo_exits_2(tmp_path: Path) -> None:
+    proc = _run(["describe", "nope"], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    assert proc.returncode == 2
+
+
+def test_owns_path_inside_repo(tmp_path: Path) -> None:
+    # ORCH_FIXTURE/api/some/file.py — note: file need not exist, owns is path-based
+    target = str(ORCH_FIXTURE / "api" / "some" / "file.py")
+    proc = _run(["owns", target], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "api"
+
+
+def test_owns_path_outside_repos_exits_2(tmp_path: Path) -> None:
+    target = str(ORCH_FIXTURE / "scratch" / "file.txt")
+    proc = _run(["owns", target], cwd=tmp_path, env_extra=_orch_env(ORCH_FIXTURE))
+    assert proc.returncode == 2
+
+
+def test_commands_require_orchestrator_workspace(tmp_path: Path) -> None:
+    # No env var, cwd has no .brm/repos.yaml.
+    proc = _run(["list"], cwd=tmp_path)
+    assert proc.returncode == 1
+    assert "orchestrator" in (proc.stderr + proc.stdout).lower()
