@@ -30,3 +30,58 @@ def find_project_root(cwd: Path) -> Path | None:
             return None
         current = current.parent
     return None
+
+
+def _read_layer(path: Path) -> str | None:
+    """Read a sidecar layer; return None on any failure."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def load_sidecar(
+    role: str,
+    *,
+    home: Path,
+    project_root: Path | None,
+) -> str:
+    """Return concatenated `<brm-sidecar>` block for `role`, or '' if no layers.
+
+    Global layer (`<home>/.claude/brm/sidecars/<role>.md`) is emitted first,
+    project layer (`<project_root>/.brm/sidecars/<role>.md`) second. Layers
+    that don't exist or can't be read are skipped silently. If neither
+    layer contributes, returns an empty string.
+    """
+    global_path = Path(home) / ".claude" / "brm" / "sidecars" / f"{role}.md"
+    project_path = (
+        Path(project_root) / ".brm" / "sidecars" / f"{role}.md"
+        if project_root
+        else None
+    )
+
+    parts: list[str] = []
+
+    if global_path.is_file():
+        body = _read_layer(global_path)
+        if body is not None:
+            parts.append(
+                f'  <layer scope="global" path="~/.claude/brm/sidecars/{role}.md">\n'
+                f"{body}"
+                f"  </layer>"
+            )
+
+    if project_path is not None and project_path.is_file():
+        body = _read_layer(project_path)
+        if body is not None:
+            parts.append(
+                f'  <layer scope="project" path=".brm/sidecars/{role}.md">\n'
+                f"{body}"
+                f"  </layer>"
+            )
+
+    if not parts:
+        return ""
+
+    inner = "\n".join(parts)
+    return f'<brm-sidecar role="{role}">\n{inner}\n</brm-sidecar>\n'

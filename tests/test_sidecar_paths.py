@@ -53,3 +53,110 @@ def test_find_project_root_caps_at_20_levels(tmp_path: Path, monkeypatch) -> Non
 def test_find_project_root_returns_cwd_itself_if_marker_present(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     assert sidecar.find_project_root(tmp_path) == tmp_path
+
+
+# --- load_sidecar ---------------------------------------------------------
+
+GLOBAL_BODY = "# Reviewer sidecar (global)\n\n## Patterns\n- 2026-01-01 — g1\n"
+PROJECT_BODY = "# Reviewer sidecar (project)\n\n## Gotchas\n- 2026-02-01 — p1\n"
+
+
+def _seed_global(home: Path, role: str, body: str) -> None:
+    d = home / ".claude" / "brm" / "sidecars"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{role}.md").write_text(body)
+
+
+def _seed_project(project_root: Path, role: str, body: str) -> None:
+    d = project_root / ".brm" / "sidecars"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{role}.md").write_text(body)
+
+
+def test_load_sidecar_returns_empty_when_neither_layer(tmp_path: Path) -> None:
+    out = sidecar.load_sidecar(
+        "reviewer", home=tmp_path / "home", project_root=tmp_path / "proj"
+    )
+    assert out == ""
+
+
+def test_load_sidecar_global_only(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_global(home, "reviewer", GLOBAL_BODY)
+    out = sidecar.load_sidecar("reviewer", home=home, project_root=proj)
+    assert out.startswith('<brm-sidecar role="reviewer">\n')
+    assert '<layer scope="global" path="~/.claude/brm/sidecars/reviewer.md">' in out
+    assert GLOBAL_BODY in out
+    assert '<layer scope="project"' not in out
+    assert out.endswith("</brm-sidecar>\n")
+
+
+def test_load_sidecar_project_only(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_project(proj, "reviewer", PROJECT_BODY)
+    out = sidecar.load_sidecar("reviewer", home=home, project_root=proj)
+    assert '<layer scope="project" path=".brm/sidecars/reviewer.md">' in out
+    assert PROJECT_BODY in out
+    assert '<layer scope="global"' not in out
+
+
+def test_load_sidecar_both_layers_global_first(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_global(home, "reviewer", GLOBAL_BODY)
+    _seed_project(proj, "reviewer", PROJECT_BODY)
+    out = sidecar.load_sidecar("reviewer", home=home, project_root=proj)
+    g = out.index("global")
+    p = out.index("project")
+    assert g < p, "global layer must appear before project layer"
+    assert GLOBAL_BODY in out
+    assert PROJECT_BODY in out
+
+
+def test_load_sidecar_no_project_root_emits_global_only(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_global(home, "dev", GLOBAL_BODY)
+    out = sidecar.load_sidecar("dev", home=home, project_root=None)
+    assert '<layer scope="global"' in out
+    assert '<layer scope="project"' not in out
+
+
+def test_load_sidecar_unreadable_layer_skipped(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_global(home, "reviewer", GLOBAL_BODY)
+    _seed_project(proj, "reviewer", PROJECT_BODY)
+
+    real_read = Path.read_text
+
+    def boom(self, *a, **kw):
+        if "global" in str(self) or ".claude/brm" in str(self):
+            raise PermissionError("simulated")
+        return real_read(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_text", boom)
+    out = sidecar.load_sidecar("reviewer", home=home, project_root=proj)
+    # global drops; project survives
+    assert '<layer scope="global"' not in out
+    assert '<layer scope="project"' in out
+    assert PROJECT_BODY in out
+
+
+def test_load_sidecar_both_unreadable_returns_empty(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_global(home, "reviewer", GLOBAL_BODY)
+    _seed_project(proj, "reviewer", PROJECT_BODY)
+    monkeypatch.setattr(
+        Path, "read_text", lambda self, *a, **kw: (_ for _ in ()).throw(OSError("nope"))
+    )
+    out = sidecar.load_sidecar("reviewer", home=home, project_root=proj)
+    assert out == ""
