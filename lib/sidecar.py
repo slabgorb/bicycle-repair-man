@@ -17,14 +17,17 @@ _PROJECT_ROOT_WALK_CAP = 20
 
 
 def find_project_root(cwd: Path) -> Path | None:
-    """Return nearest ancestor of `cwd` containing `.git` or `.brm/`.
+    """Return nearest ancestor of `cwd` containing `.git` or `.brm/sidecars/`.
 
     Walks at most _PROJECT_ROOT_WALK_CAP levels. Returns None if no marker
-    is found within the cap.
+    is found within the cap. Note: bare `.brm/` is NOT a project-root marker;
+    it may indicate an orchestrator root (which has `.brm/repos.yaml`) rather
+    than a repo. The repo marker is `.git` or the presence of project-level
+    `.brm/sidecars/`.
     """
     current = Path(cwd).resolve()
     for _ in range(_PROJECT_ROOT_WALK_CAP + 1):
-        if (current / ".git").exists() or (current / ".brm").is_dir():
+        if (current / ".git").exists() or (current / ".brm" / "sidecars").is_dir():
             return current
         if current.parent == current:
             return None

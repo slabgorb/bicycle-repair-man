@@ -25,11 +25,21 @@ def test_find_project_root_finds_git_file(tmp_path: Path) -> None:
     assert sidecar.find_project_root(sub) == tmp_path
 
 
-def test_find_project_root_finds_brm_dir(tmp_path: Path) -> None:
-    (tmp_path / ".brm").mkdir()
+def test_find_project_root_finds_brm_sidecars_dir(tmp_path: Path) -> None:
+    (tmp_path / ".brm" / "sidecars").mkdir(parents=True)
     sub = tmp_path / "deep" / "nested"
     sub.mkdir(parents=True)
     assert sidecar.find_project_root(sub) == tmp_path
+
+
+def test_find_project_root_ignores_bare_brm_without_sidecars(tmp_path: Path) -> None:
+    # An orchestrator root has .brm/repos.yaml but no .brm/sidecars/ —
+    # find_project_root must NOT match it.
+    (tmp_path / ".brm").mkdir()
+    (tmp_path / ".brm" / "repos.yaml").write_text("repos: {}\n")
+    sub = tmp_path / "deep"
+    sub.mkdir()
+    assert sidecar.find_project_root(sub) is None
 
 
 def test_find_project_root_returns_none_when_not_found(tmp_path: Path) -> None:
