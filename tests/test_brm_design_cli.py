@@ -200,3 +200,53 @@ def test_handoff_from_file(orch: Path, tmp_path: Path):
         cwd=orch,
     )
     assert r.returncode == 0, r.stderr
+
+
+GOOD_GATE_RESULT = (
+    'GATE_RESULT:\n'
+    '  status: pass\n'
+    '  gate: tests-fail\n'
+    '  repo: api\n'
+    '  message: "All ACs covered"\n'
+)
+
+BAD_GATE_RESULT = "no GATE_RESULT block here\n"
+
+
+def test_gate_emits_prompt_with_context(orch: Path):
+    _run(["init", "g", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-g.md"))
+    # init already starts the first phase, so the gate has context.
+    r = _run(["gate", str(design_path)], cwd=orch / "api")
+    assert r.returncode == 0
+    assert "<gate-context>" in r.stdout
+    assert 'repo="api"' in r.stdout
+    assert "tests-fail" in r.stdout
+
+
+def test_record_gate_pass(orch: Path):
+    _run(["init", "rg", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-rg.md"))
+    r = _run(
+        ["record-gate", str(design_path), "--result-stdin"],
+        cwd=orch, input_text=GOOD_GATE_RESULT,
+    )
+    assert r.returncode == 0, r.stderr
+    fm = _load_fm(design_path)
+    red = next(p for p in fm["phases"] if p["name"] == "red-api")
+    assert red["gate_result"] == "pass"
+    assert any(h["event"] == "gate-pass" for h in fm["history"])
+
+
+def test_record_gate_default_deny(orch: Path):
+    _run(["init", "rgd", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-rgd.md"))
+    r = _run(
+        ["record-gate", str(design_path), "--result-stdin"],
+        cwd=orch, input_text=BAD_GATE_RESULT,
+    )
+    assert r.returncode == 1
+    # Default-deny: malformed result must not be persisted.
+    fm = _load_fm(design_path)
+    red = next(p for p in fm["phases"] if p["name"] == "red-api")
+    assert red["gate_result"] is None
