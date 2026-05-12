@@ -1,0 +1,7 @@
+repos:
+  api:
+    path: api
+    type: api
+    default_branch: main
+    test_command: pytest
+    lint_command: ruff check
