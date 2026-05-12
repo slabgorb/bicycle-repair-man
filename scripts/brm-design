@@ -454,8 +454,19 @@ def _repo_path(orch: Path | None, repo_name: str | None) -> Path | None:
 
 
 def cmd_advance(args) -> int:
-    print("brm-design advance: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    path = _resolve_design_path(args.design_path, cwd)
+    d = _read_design(path)
+    try:
+        _design.advance_phase(d, to=args.to, at=_now_iso(), force=args.force)
+    except _design.DesignTransitionError as e:
+        print(f"brm-design advance: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
+    except _design.DesignSchemaError as e:
+        print(f"brm-design advance: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
+    _write_design_atomic(d, path)
+    return EXIT_OK
 
 
 def cmd_block(args) -> int:

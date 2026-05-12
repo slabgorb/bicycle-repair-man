@@ -250,3 +250,34 @@ def test_record_gate_default_deny(orch: Path):
     fm = _load_fm(design_path)
     red = next(p for p in fm["phases"] if p["name"] == "red-api")
     assert red["gate_result"] is None
+
+
+def test_advance_after_pass(orch: Path):
+    _run(["init", "a", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-a.md"))
+    _run(["record-gate", str(design_path), "--result-stdin"],
+         cwd=orch, input_text=GOOD_GATE_RESULT)
+    r = _run(["advance", str(design_path), "--to", "green-api"], cwd=orch)
+    assert r.returncode == 0, r.stderr
+    fm = _load_fm(design_path)
+    assert fm["current_phase"] == "green-api"
+
+
+def test_advance_without_gate_rejected(orch: Path):
+    _run(["init", "b", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-b.md"))
+    r = _run(["advance", str(design_path), "--to", "green-api"], cwd=orch)
+    assert r.returncode == 1
+    assert "gate" in r.stderr.lower()
+
+
+def test_advance_force(orch: Path):
+    _run(["init", "c", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-c.md"))
+    r = _run(
+        ["advance", str(design_path), "--to", "green-api", "--force"],
+        cwd=orch,
+    )
+    assert r.returncode == 0
+    fm = _load_fm(design_path)
+    assert any(h["event"] == "phase-skip" for h in fm["history"])
