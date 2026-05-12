@@ -250,8 +250,61 @@ def _resolve_repos_arg(repos_arg: str | None, cwd: Path, orch: Path | None) -> l
 
 
 def cmd_status(args) -> int:
-    print("brm-design status: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    path = _resolve_design_path(args.design_path, cwd)
+    try:
+        d = _read_design(path)
+    except _design.DesignSchemaError as e:
+        print(f"brm-design status: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
+
+    if args.json:
+        import json as _json
+        payload = {
+            "path": str(path),
+            "design": d.design,
+            "workflow": d.workflow,
+            "repos": d.repos,
+            "status": d.status,
+            "current_phase": d.current_phase,
+            "phases": [
+                {
+                    "name": p.name,
+                    "repo": p.repo,
+                    "repos": p.repos,
+                    "status": p.status,
+                    "gate_result": p.gate_result,
+                }
+                for p in d.phases
+            ],
+        }
+        print(_json.dumps(payload, indent=2))
+        return EXIT_OK
+
+    cur = d.current()
+    next_phase = _next_phase_name(d)
+    print(f"Design:        {d.design}")
+    print(f"Path:          {path}")
+    print(f"Workflow:      {d.workflow}")
+    print(f"Repos:         {', '.join(d.repos)}")
+    print(f"Status:        {d.status}")
+    print(f"Current phase: {cur.name}  ({cur.status})")
+    print(f"Next phase:    {next_phase or '(none)'}")
+    print()
+    print("Phases:")
+    for p in d.phases:
+        scope = p.repo or (",".join(p.repos) if p.repos else "—")
+        gate = p.gate_result or "—"
+        print(f"  {p.status:>12}  {p.name:<24} repo={scope:<12} gate={gate}")
+    return EXIT_OK
+
+
+def _next_phase_name(d: _design.Design) -> str | None:
+    cur = d.current()
+    idx = next(i for i, p in enumerate(d.phases) if p.name == cur.name)
+    if idx + 1 < len(d.phases):
+        return d.phases[idx + 1].name
+    return None
 
 
 def cmd_handoff(args) -> int:

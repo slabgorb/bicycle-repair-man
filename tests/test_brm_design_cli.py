@@ -117,3 +117,39 @@ def test_init_unknown_workflow(orch: Path):
     r = _run(["init", "q", "--workflow", "no-such", "--repos", "api"], cwd=orch)
     assert r.returncode == 1
     assert "not found" in r.stderr.lower()
+
+
+def test_status_text(orch: Path):
+    _run(["init", "s", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-s.md"))
+    r = _run(["status", str(design_path)], cwd=orch)
+    assert r.returncode == 0
+    assert "tdd" in r.stdout
+    assert "red-api" in r.stdout
+    assert "planned" in r.stdout
+
+
+def test_status_json_shape(orch: Path):
+    _run(["init", "j", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-j.md"))
+    r = _run(["status", str(design_path), "--json"], cwd=orch)
+    assert r.returncode == 0
+    payload = json.loads(r.stdout)
+    assert payload["workflow"] == "tdd"
+    assert payload["current_phase"] == "red-api"
+    assert payload["repos"] == ["api"]
+    assert isinstance(payload["phases"], list)
+
+
+def test_status_auto_discovers_active(orch: Path):
+    _run(["init", "auto", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    # init produces status: in-progress, so the design is immediately active.
+    r = _run(["status"], cwd=orch / "api")
+    assert r.returncode == 0
+    assert "auto" in r.stdout
+
+
+def test_status_no_active_returns_2(orch: Path):
+    r = _run(["status"], cwd=orch / "api")
+    assert r.returncode == 2
+    assert "no active design" in r.stderr.lower()
