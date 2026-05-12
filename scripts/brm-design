@@ -470,23 +470,43 @@ def cmd_advance(args) -> int:
 
 
 def cmd_block(args) -> int:
-    print("brm-design block: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    path = _resolve_design_path(args.design_path, cwd)
+    d = _read_design(path)
+    _design.block_design(d, reason=args.reason, at=_now_iso())
+    _write_design_atomic(d, path)
+    return EXIT_OK
 
 
 def cmd_unblock(args) -> int:
-    print("brm-design unblock: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    path = _resolve_design_path(args.design_path, cwd)
+    d = _read_design(path)
+    _design.unblock_design(d, at=_now_iso())
+    _write_design_atomic(d, path)
+    return EXIT_OK
 
 
 def cmd_complete(args) -> int:
-    print("brm-design complete: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    path = _resolve_design_path(args.design_path, cwd)
+    d = _read_design(path)
+    try:
+        _design.mark_complete(d, at=_now_iso())
+    except _design.DesignTransitionError as e:
+        print(f"brm-design complete: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
+    _write_design_atomic(d, path)
+    return EXIT_OK
 
 
 def cmd_abandon(args) -> int:
-    print("brm-design abandon: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    path = _resolve_design_path(args.design_path, cwd)
+    d = _read_design(path)
+    _design.mark_abandoned(d, reason=args.reason, at=_now_iso())
+    _write_design_atomic(d, path)
+    return EXIT_OK
 
 
 def cmd_list(args) -> int:

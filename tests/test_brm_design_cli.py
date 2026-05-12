@@ -281,3 +281,30 @@ def test_advance_force(orch: Path):
     assert r.returncode == 0
     fm = _load_fm(design_path)
     assert any(h["event"] == "phase-skip" for h in fm["history"])
+
+
+def test_block_unblock_round_trip(orch: Path):
+    _run(["init", "bu", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-bu.md"))
+    r1 = _run(["block", str(design_path), "--reason", "waiting"], cwd=orch)
+    assert r1.returncode == 0
+    assert _load_fm(design_path)["status"] == "blocked"
+    r2 = _run(["unblock", str(design_path)], cwd=orch)
+    assert r2.returncode == 0
+    assert _load_fm(design_path)["status"] == "in-progress"
+
+
+def test_abandon(orch: Path):
+    _run(["init", "ab", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-ab.md"))
+    r = _run(["abandon", str(design_path), "--reason", "obsolete"], cwd=orch)
+    assert r.returncode == 0
+    assert _load_fm(design_path)["status"] == "abandoned"
+
+
+def test_complete_rejected_when_phases_pending(orch: Path):
+    _run(["init", "cp", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-cp.md"))
+    r = _run(["complete", str(design_path)], cwd=orch)
+    assert r.returncode == 1
+    assert "complete" in r.stderr.lower()
