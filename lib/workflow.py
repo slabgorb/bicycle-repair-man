@@ -141,3 +141,41 @@ def validate_workflow(wf: Workflow) -> None:
             raise WorkflowSchemaError(
                 f"phase '{p.name}': next '{p.next}' is not a phase name"
             )
+
+
+def expand_phases(wf: Workflow, repos: list[str]) -> list[WorkflowPhase]:
+    """Resolve $each / $all sentinels against the design's repos list."""
+    if not repos:
+        raise WorkflowSchemaError("cannot expand: repos list is empty")
+
+    out: list[WorkflowPhase] = []
+    for p in wf.phases:
+        if p.repo == "$each":
+            for r in repos:
+                out.append(WorkflowPhase(
+                    name=f"{p.name}-{r}",
+                    agent=p.agent,
+                    repo=r,
+                    repos=None,
+                    gate=p.gate,
+                    next=None,    # explicit next is dropped under $each expansion
+                ))
+        elif p.repos == "$all":
+            out.append(WorkflowPhase(
+                name=p.name,
+                agent=p.agent,
+                repo=None,
+                repos=list(repos),
+                gate=p.gate,
+                next=p.next,
+            ))
+        else:
+            out.append(WorkflowPhase(
+                name=p.name,
+                agent=p.agent,
+                repo=p.repo,
+                repos=list(p.repos) if p.repos else None,
+                gate=p.gate,
+                next=p.next,
+            ))
+    return out
