@@ -83,3 +83,33 @@ def test_match_median_under_250ms(tmp_path: Path) -> None:
     elapsed.sort()
     median = elapsed[2]
     assert median < 0.25, f"hook median {median:.3f}s exceeds 250ms budget"
+
+
+PERF_ORCH = Path(__file__).resolve().parent / "fixtures" / "designs" / "perf-orch"
+
+
+def _run_hook_subprocess(prompt: str, *, cwd: Path, home: Path) -> str:
+    env = {**os.environ, "BRM_HOME": str(home)}
+    event = json.dumps({"hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt, "cwd": str(cwd)})
+    proc = subprocess.run(
+        ["python3", str(HOOK_SCRIPT)],
+        input=event, capture_output=True, text=True, env=env, timeout=10,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout or "{}")
+    return payload.get("hookSpecificOutput", {}).get("additionalContext", "")
+
+
+def test_hook_design_walk_under_budget(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    times = []
+    for _ in range(11):
+        start = time.perf_counter()
+        out = _run_hook_subprocess(prompt="/dev x", cwd=PERF_ORCH / "api", home=home)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        times.append(elapsed_ms)
+        assert "<brm-design" in out  # the one active design must be picked up
+    times.sort()
+    median = times[len(times) // 2]
+    assert median < 250, f"hook median {median}ms > 250ms budget"

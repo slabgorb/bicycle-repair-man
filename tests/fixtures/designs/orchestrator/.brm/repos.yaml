@@ -1,0 +1,13 @@
+repos:
+  api:
+    path: api
+    type: api
+    default_branch: main
+    test_command: pytest
+    lint_command: ruff check
+  ui:
+    path: ui
+    type: ui
+    default_branch: main
+    test_command: vitest run
+    lint_command: eslint .

@@ -1,0 +1,23 @@
+workflow:
+  name: patch
+  description: Trivial-tier fixes; no separate test phase.
+  version: "0.3.0"
+  expansion: per-repo
+  phases:
+    - name: implement
+      agent: dev
+      repo: $each
+      gate:
+        file: gates/tests-pass
+        condition: Tests passing in ${repo.name}
+    - name: review
+      agent: reviewer
+      repos: $all
+      gate:
+        file: gates/approval
+    - name: finish
+      agent: pm
+      gate:
+        file: gates/design-complete
+  triggers:
+    default: false

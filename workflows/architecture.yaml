@@ -1,0 +1,20 @@
+workflow:
+  name: architecture
+  description: Architecture work; all phases unscoped (operate across the design).
+  version: "0.3.0"
+  expansion: per-repo
+  phases:
+    - name: research
+      agent: architect
+    - name: propose
+      agent: architect
+    - name: approve
+      agent: reviewer
+      gate:
+        file: gates/approval
+    - name: finish
+      agent: pm
+      gate:
+        file: gates/design-complete
+  triggers:
+    default: false
