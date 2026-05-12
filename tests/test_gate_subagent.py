@@ -146,3 +146,12 @@ def test_parse_gate_result_rejects_unknown_status():
     """)
     with pytest.raises(GateResultError, match="status"):
         parse_gate_result(text)
+
+
+def test_builtin_gates_parse():
+    plugin_root = Path(__file__).resolve().parents[1]
+    for name in ("tests-fail", "tests-pass", "quality-pass", "approval", "design-complete"):
+        path = plugin_root / "gates" / f"{name}.md"
+        assert path.is_file(), f"missing {path}"
+        g = parse_gate_file(path)
+        assert g.name == name
