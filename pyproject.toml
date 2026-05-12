@@ -1,0 +1,21 @@
+[project]
+name = "brm"
+version = "0.1.0"
+description = "Claude Code plugin: role-bounded slash commands with per-role sidecar memory"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+# Flat layout: tell setuptools only `lib/` is a Python package. Without
+# this, `pip install -e` fails because setuptools sees both `lib/` and
+# `hooks/` as candidate packages and refuses to auto-pick one.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lib"]
