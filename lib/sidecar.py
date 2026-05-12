@@ -48,15 +48,20 @@ def load_sidecar(
     *,
     home: Path,
     project_root: Path | None,
+    orchestrator_root: Path | None = None,
 ) -> str:
     """Return concatenated `<brm-sidecar>` block for `role`, or '' if no layers.
 
-    Global layer (`<home>/.claude/brm/sidecars/<role>.md`) is emitted first,
-    project layer (`<project_root>/.brm/sidecars/<role>.md`) second. Layers
-    that don't exist or can't be read are skipped silently. If neither
-    layer contributes, returns an empty string.
+    Layers emitted in order: global, orchestrator, project. Each layer is
+    looked up at its scoped path and silently dropped if missing or unreadable.
+    If no layer contributes, returns an empty string.
     """
     global_path = Path(home) / ".claude" / "brm" / "sidecars" / f"{role}.md"
+    orchestrator_path = (
+        Path(orchestrator_root) / ".brm" / "sidecars" / f"{role}.md"
+        if orchestrator_root
+        else None
+    )
     project_path = (
         Path(project_root) / ".brm" / "sidecars" / f"{role}.md"
         if project_root
@@ -70,6 +75,15 @@ def load_sidecar(
         if body is not None:
             parts.append(
                 f'  <layer scope="global" path="~/.claude/brm/sidecars/{role}.md">\n'
+                f"{body.rstrip(chr(10))}\n"
+                f"  </layer>"
+            )
+
+    if orchestrator_path is not None and orchestrator_path.is_file():
+        body = _read_layer(orchestrator_path)
+        if body is not None:
+            parts.append(
+                f'  <layer scope="orchestrator" path=".brm/sidecars/{role}.md">\n'
                 f"{body.rstrip(chr(10))}\n"
                 f"  </layer>"
             )
