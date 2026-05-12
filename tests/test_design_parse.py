@@ -1,6 +1,7 @@
 """Unit tests for lib/design.py parse + dataclasses."""
 from __future__ import annotations
 
+import datetime as _dt
 import textwrap
 
 import pytest
@@ -10,6 +11,16 @@ from lib.design import (
     DesignSchemaError,
     Phase,
     parse_design_text,
+    serialize_design,
+    advance_phase,
+    record_gate_pass,
+    record_gate_fail,
+    start_phase,
+    block_design,
+    unblock_design,
+    mark_complete,
+    mark_abandoned,
+    DesignTransitionError,
 )
 
 
@@ -186,3 +197,114 @@ def test_parse_phases_null_rejected():
     """)
     with pytest.raises(DesignSchemaError, match="phases"):
         parse_design_text(text)
+
+
+def _fresh_planned_design():
+    text = textwrap.dedent("""\
+        ---
+        design: 2026-05-12-x
+        created: 2026-05-12T10:00:00-04:00
+        workflow: tdd
+        repos: [api]
+        status: planned
+        current_phase: red-api
+        phases:
+          - {name: red-api, repo: api, status: planned, started: null, finished: null, handoff: null, gate_result: null}
+          - {name: green-api, repo: api, status: planned, started: null, finished: null, handoff: null, gate_result: null}
+        history: []
+        ---
+
+        body
+    """)
+    return parse_design_text(text)
+
+
+def test_serialize_round_trip():
+    d = parse_design_text(VALID_DESIGN)
+    text = serialize_design(d)
+    d2 = parse_design_text(text)
+    assert d2 == d
+
+
+def test_start_phase_marks_in_progress_and_records_history():
+    d = _fresh_planned_design()
+    d = start_phase(d, "red-api", actor="tea", at="2026-05-12T10:01:00-04:00")
+    assert d.phase("red-api").status == "in-progress"
+    assert d.phase("red-api").started == "2026-05-12T10:01:00-04:00"
+    assert d.status == "in-progress"
+    assert d.history[-1] == {
+        "at": "2026-05-12T10:01:00-04:00",
+        "event": "phase-start",
+        "phase": "red-api",
+        "actor": "tea",
+    }
+
+
+def test_record_gate_pass_then_advance():
+    d = _fresh_planned_design()
+    d = start_phase(d, "red-api", actor="tea", at="2026-05-12T10:01:00-04:00")
+    d = record_gate_pass(d, gate="tests-fail", at="2026-05-12T10:10:00-04:00", actor="tea")
+    assert d.phase("red-api").gate_result == "pass"
+    d = advance_phase(d, to="green-api", at="2026-05-12T10:11:00-04:00")
+    assert d.current_phase == "green-api"
+    assert d.phase("red-api").status == "complete"
+    assert d.phase("red-api").finished == "2026-05-12T10:11:00-04:00"
+    assert d.phase("green-api").status == "in-progress"
+
+
+def test_advance_without_gate_pass_rejected():
+    d = _fresh_planned_design()
+    d = start_phase(d, "red-api", actor="tea", at="2026-05-12T10:01:00-04:00")
+    with pytest.raises(DesignTransitionError, match="gate"):
+        advance_phase(d, to="green-api", at="2026-05-12T10:11:00-04:00")
+
+
+def test_advance_force_records_phase_skip():
+    d = _fresh_planned_design()
+    d = start_phase(d, "red-api", actor="tea", at="2026-05-12T10:01:00-04:00")
+    d = advance_phase(d, to="green-api", at="2026-05-12T10:11:00-04:00", force=True)
+    assert any(h["event"] == "phase-skip" for h in d.history)
+
+
+def test_record_gate_fail_does_not_advance():
+    d = _fresh_planned_design()
+    d = start_phase(d, "red-api", actor="tea", at="2026-05-12T10:01:00-04:00")
+    d = record_gate_fail(d, gate="tests-fail", at="2026-05-12T10:10:00-04:00", actor="tea")
+    assert d.phase("red-api").gate_result == "fail"
+    assert d.current_phase == "red-api"
+
+
+def test_block_unblock_round_trip():
+    d = _fresh_planned_design()
+    d = start_phase(d, "red-api", actor="tea", at="2026-05-12T10:01:00-04:00")
+    d = block_design(d, reason="waiting on external API spec", at="2026-05-12T10:30:00-04:00")
+    assert d.status == "blocked"
+    d = unblock_design(d, at="2026-05-12T11:00:00-04:00")
+    assert d.status == "in-progress"
+
+
+def test_mark_complete_requires_all_phases_complete():
+    d = _fresh_planned_design()
+    with pytest.raises(DesignTransitionError, match="not.*complete"):
+        mark_complete(d, at="2026-05-12T12:00:00-04:00")
+
+
+def test_mark_abandoned_terminal():
+    d = _fresh_planned_design()
+    d = mark_abandoned(d, reason="superseded", at="2026-05-12T12:00:00-04:00")
+    assert d.status == "abandoned"
+
+
+def test_advance_to_self_rejected():
+    d = _fresh_planned_design()
+    d = start_phase(d, "red-api", actor="tea", at="2026-05-12T10:01:00-04:00")
+    d = record_gate_pass(d, gate="tests-fail", at="2026-05-12T10:10:00-04:00", actor="tea")
+    with pytest.raises(DesignTransitionError, match="current phase"):
+        advance_phase(d, to="red-api", at="2026-05-12T10:11:00-04:00")
+
+
+def test_advance_from_planned_phase_rejected_even_with_force():
+    d = _fresh_planned_design()
+    # current_phase is red-api but start_phase was never called → status is "planned"
+    with pytest.raises(DesignTransitionError, match="not in-progress"):
+        advance_phase(d, to="green-api", at="2026-05-12T10:11:00-04:00", force=True)
