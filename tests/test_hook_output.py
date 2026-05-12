@@ -138,3 +138,124 @@ def test_malformed_stdin_exits_zero_empty(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0
     assert proc.stdout.strip() in ("{}", '{"hookSpecificOutput": {}}')
+
+
+# --- Orchestrator scenarios ----------------------------------------------
+
+ORCH_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "orchestrator"
+
+
+def _run_hook_orch(
+    prompt: str,
+    *,
+    home: Path,
+    orchestrator_root: Path | None,
+    project_root: Path | None,
+) -> dict:
+    env = {**os.environ, "BRM_HOME": str(home)}
+    if orchestrator_root is not None:
+        env["BRM_ORCHESTRATOR_ROOT"] = str(orchestrator_root)
+    else:
+        env.pop("BRM_ORCHESTRATOR_ROOT", None)
+    if project_root is not None:
+        env["BRM_PROJECT_ROOT"] = str(project_root)
+    else:
+        env.pop("BRM_PROJECT_ROOT", None)
+    event = json.dumps({"hook_event_name": "UserPromptSubmit", "prompt": prompt})
+    proc = subprocess.run(
+        ["python3", str(HOOK_SCRIPT)],
+        input=event,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout or "{}")
+
+
+def test_orchestrator_block_emitted_with_cwd_repo(tmp_path: Path) -> None:
+    out = _run_hook_orch(
+        "/reviewer hi",
+        home=tmp_path,
+        orchestrator_root=ORCH_FIXTURE,
+        project_root=ORCH_FIXTURE / "api",
+    )
+    ctx = _additional(out)
+    assert '<brm-orchestrator root="' in ctx
+    assert 'cwd-repo="api"' in ctx
+    assert "<repos.yaml>" in ctx
+    # Verbatim content present
+    assert "test_command: pytest" in ctx
+    assert "test_command: npm test" in ctx
+
+
+def test_orchestrator_block_omits_cwd_repo_when_not_in_a_repo(tmp_path: Path) -> None:
+    out = _run_hook_orch(
+        "/reviewer hi",
+        home=tmp_path,
+        orchestrator_root=ORCH_FIXTURE,
+        project_root=tmp_path,  # not under any declared path
+    )
+    ctx = _additional(out)
+    assert "<brm-orchestrator" in ctx
+    assert 'cwd-repo=' not in ctx
+
+
+def test_orchestrator_three_layer_sidecar_when_all_present(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    # Seed a global layer too.
+    (home / ".claude" / "brm" / "sidecars").mkdir(parents=True)
+    (home / ".claude" / "brm" / "sidecars" / "reviewer.md").write_text(
+        "# Global\n## Patterns\n- 2026-01-01 — global thing\n"
+    )
+    out = _run_hook_orch(
+        "/reviewer hi",
+        home=home,
+        orchestrator_root=ORCH_FIXTURE,
+        project_root=ORCH_FIXTURE / "api",
+    )
+    ctx = _additional(out)
+    assert '<layer scope="global"' in ctx
+    assert '<layer scope="orchestrator"' in ctx
+    assert '<layer scope="project"' in ctx
+    g = ctx.index('scope="global"')
+    o = ctx.index('scope="orchestrator"')
+    p = ctx.index('scope="project"')
+    assert g < o < p
+
+
+def test_orchestrator_malformed_repos_yaml_drops_block_but_keeps_sidecars(
+    tmp_path: Path,
+) -> None:
+    bad_orch = tmp_path / "bad-orch"
+    (bad_orch / ".brm" / "sidecars").mkdir(parents=True)
+    (bad_orch / ".brm" / "repos.yaml").write_text("not: valid: yaml: at: all:\n  - [\n")
+    (bad_orch / ".brm" / "sidecars" / "reviewer.md").write_text(
+        "# bad orch sidecar\n## Patterns\n- 2026-04-15 — present\n"
+    )
+    out = _run_hook_orch(
+        "/reviewer hi",
+        home=tmp_path / "home",
+        orchestrator_root=bad_orch,
+        project_root=None,
+    )
+    ctx = _additional(out)
+    assert "<brm-orchestrator" not in ctx
+    assert '<layer scope="orchestrator"' in ctx  # sidecar still fires
+    assert "present" in ctx
+
+
+def test_orchestrator_no_orch_root_falls_back_to_v01_behavior(tmp_path: Path) -> None:
+    """Sanity: explicit BRM_ORCHESTRATOR_ROOT unset → v0.1.0 behavior."""
+    out = _run_hook_orch(
+        "/reviewer hi",
+        home=FIXTURES / "global",
+        orchestrator_root=None,
+        project_root=FIXTURES / "project",
+    )
+    ctx = _additional(out)
+    assert "<brm-orchestrator" not in ctx
+    assert '<brm-sidecar role="reviewer">' in ctx
+    assert '<layer scope="orchestrator"' not in ctx

@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""BRM UserPromptSubmit hook.
+"""BRM UserPromptSubmit hook (v0.2 — orchestrator-aware).
 
-Detects a leading `/role` or `/brm:role` token and injects the corresponding
-sidecar content as `additionalContext`. Any failure → exit 0 with empty
-output; missing context is far better than a blocked prompt.
+Detects a leading `/role` or `/brm:role` token and injects:
+  1. A `<brm-sidecar>` block with up to three sidecar layers
+     (global, orchestrator, project) when present.
+  2. A `<brm-orchestrator>` block with the workspace's repos.yaml content
+     when an orchestrator root is detected.
+
+Any failure → exit 0 with empty output; missing context is far better than
+a blocked prompt.
 """
 from __future__ import annotations
 
@@ -22,7 +27,6 @@ from lib import sidecar as _sidecar  # noqa: E402
 
 
 def _emit(additional_context: str) -> None:
-    """Write the hook response to stdout."""
     if not additional_context:
         print(json.dumps({}))
         return
@@ -39,13 +43,53 @@ def _home() -> Path:
     return Path(os.environ.get("BRM_HOME") or os.path.expanduser("~"))
 
 
-def _project_root(event: dict[str, Any]) -> Path | None:
+def _orchestrator_root(event: dict[str, Any], cwd: Path) -> Path | None:
+    override = os.environ.get("BRM_ORCHESTRATOR_ROOT")
+    if override:
+        candidate = Path(override)
+        # Trust env var only if it actually has a repos.yaml file.
+        if (candidate / ".brm" / "repos.yaml").is_file():
+            return candidate
+        return None
+    from lib import orchestrator as _orch
+    return _orch.find_orchestrator_root(cwd)
+
+
+def _project_root(event: dict[str, Any], cwd: Path) -> Path | None:
     override = os.environ.get("BRM_PROJECT_ROOT")
     if override:
-        # Override is treated as an authoritative root, regardless of markers.
         return Path(override)
-    cwd_str = event.get("cwd") or os.getcwd()
-    return _sidecar.find_project_root(Path(cwd_str))
+    return _sidecar.find_project_root(cwd)
+
+
+def _render_orchestrator_block(orch_root: Path, cwd: Path) -> str | None:
+    """Build the <brm-orchestrator> XML block, or None on any failure."""
+    try:
+        from lib import orchestrator as _orch
+        repos_yaml_path = orch_root / ".brm" / "repos.yaml"
+        text = repos_yaml_path.read_text(encoding="utf-8", errors="replace")
+        repos = _orch.parse_repos_yaml(text)
+    except Exception as e:
+        print(f"brm: orchestrator block skipped: {e}", file=sys.stderr)
+        return None
+
+    cwd_repo_name = None
+    try:
+        from lib import orchestrator as _orch
+        cwd_repo_name = _orch.cwd_repo(cwd, orch_root, repos)
+    except Exception:
+        pass  # If cwd resolution fails, just omit the attribute.
+
+    attrs = f'root="{orch_root}"'
+    if cwd_repo_name:
+        attrs += f' cwd-repo="{cwd_repo_name}"'
+    return (
+        f"<brm-orchestrator {attrs}>\n"
+        f"<repos.yaml>\n"
+        f"{text.rstrip(chr(10))}\n"
+        f"</repos.yaml>\n"
+        f"</brm-orchestrator>\n"
+    )
 
 
 def main() -> int:
@@ -67,12 +111,32 @@ def main() -> int:
         if not role:
             _emit("")
             return 0
-        content = _sidecar.load_sidecar(
+
+        cwd = Path(event.get("cwd") or os.getcwd())
+        orch_root = _orchestrator_root(event, cwd)
+        proj_root = _project_root(event, cwd)
+
+        # Use proj_root as the effective cwd for cwd_repo resolution when available,
+        # since BRM_PROJECT_ROOT / event["cwd"] may differ and proj_root is more specific.
+        effective_cwd = proj_root if proj_root is not None else cwd
+
+        sidecar_block = _sidecar.load_sidecar(
             role,
             home=_home(),
-            project_root=_project_root(event),
+            project_root=proj_root,
+            orchestrator_root=orch_root,
         )
-        _emit(content)
+
+        orchestrator_block = (
+            _render_orchestrator_block(orch_root, effective_cwd) if orch_root else None
+        )
+
+        pieces: list[str] = []
+        if sidecar_block:
+            pieces.append(sidecar_block.rstrip("\n"))
+        if orchestrator_block:
+            pieces.append(orchestrator_block.rstrip("\n"))
+        _emit("\n".join(pieces) + "\n" if pieces else "")
         return 0
     except Exception:
         traceback.print_exc(file=sys.stderr)

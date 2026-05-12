@@ -1,0 +1,17 @@
+repos:
+  api:
+    path: api
+    type: api
+    description: REST API
+    default_branch: main
+    test_command: pytest
+    lint_command: ruff check
+    build_command: ""
+  ui:
+    path: ui
+    type: ui
+    description: Web client
+    default_branch: main
+    test_command: npm test
+    lint_command: npm run lint
+    build_command: npm run build
