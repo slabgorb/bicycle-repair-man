@@ -5,20 +5,30 @@ persistent memory files BRM injects on role activation.
 
 ## Layers
 
-A role has up to two sidecar files:
+A role has up to three sidecar files. Layers are emitted in order from
+**most general** to **most specific**, so the most specific lessons appear
+last (and are most salient to the model).
 
 | Layer | Path | Purpose |
 |---|---|---|
 | Global | `~/.claude/brm/sidecars/<role>.md` | Lessons that follow you across projects. |
-| Project | `<project_root>/.brm/sidecars/<role>.md` | Lessons specific to this codebase. |
+| Orchestrator | `<orchestrator_root>/.brm/sidecars/<role>.md` | Lessons specific to a multi-repo workspace. Only present when an orchestrator root is detected (`.brm/repos.yaml` exists in some ancestor of cwd). |
+| Project | `<project_root>/.brm/sidecars/<role>.md` | Lessons specific to a single repo. |
+
+`<orchestrator_root>` is the nearest ancestor of the current directory whose
+`.brm/repos.yaml` is a regular file, with a 20-level walk cap. See
+`docs/orchestrator-schema.md` for the orchestrator config schema.
 
 `<project_root>` is the nearest ancestor of the current directory that
-contains a `.git` (file or directory) or `.brm/` directory, with a 20-level
-walk cap. If no project root is found, only the global layer can contribute.
+contains `.git` (file or directory) or `.brm/sidecars/` (directory), with a
+20-level walk cap. Note: a bare `.brm/` directory is NOT a project-root
+marker — it may indicate an orchestrator root instead.
 
-Project files do not override the global file; both layers contribute. The
-hook injects the global layer first, then the project layer, so newer
-project-specific knowledge appears last in the model's context.
+If no orchestrator root is found, only global + project layers can
+contribute (v0.1.0 behavior). If neither orchestrator nor project root is
+found, only the global layer can contribute.
+
+No layer overrides any other; all available layers concatenate.
 
 ## File format
 
@@ -56,14 +66,17 @@ user prompt, the hook emits:
   <layer scope="global" path="~/.claude/brm/sidecars/<role>.md">
 <file contents verbatim>
   </layer>
+  <layer scope="orchestrator" path=".brm/sidecars/<role>.md">
+<file contents verbatim>
+  </layer>
   <layer scope="project" path=".brm/sidecars/<role>.md">
 <file contents verbatim>
   </layer>
 </brm-sidecar>
 ```
 
-Layers that don't exist or are unreadable are silently skipped. If neither
-layer contributes, the hook emits no `additionalContext` at all.
+Layers that don't exist or are unreadable are silently skipped. If no layer
+contributes, the hook emits no `<brm-sidecar>` block at all.
 
 ## Writing to sidecars
 

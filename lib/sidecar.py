@@ -17,14 +17,17 @@ _PROJECT_ROOT_WALK_CAP = 20
 
 
 def find_project_root(cwd: Path) -> Path | None:
-    """Return nearest ancestor of `cwd` containing `.git` or `.brm/`.
+    """Return nearest ancestor of `cwd` containing `.git` or `.brm/sidecars/`.
 
     Walks at most _PROJECT_ROOT_WALK_CAP levels. Returns None if no marker
-    is found within the cap.
+    is found within the cap. Note: bare `.brm/` is NOT a project-root marker;
+    it may indicate an orchestrator root (which has `.brm/repos.yaml`) rather
+    than a repo. The repo marker is `.git` or the presence of project-level
+    `.brm/sidecars/`.
     """
     current = Path(cwd).resolve()
     for _ in range(_PROJECT_ROOT_WALK_CAP + 1):
-        if (current / ".git").exists() or (current / ".brm").is_dir():
+        if (current / ".git").exists() or (current / ".brm" / "sidecars").is_dir():
             return current
         if current.parent == current:
             return None
@@ -45,15 +48,20 @@ def load_sidecar(
     *,
     home: Path,
     project_root: Path | None,
+    orchestrator_root: Path | None = None,
 ) -> str:
     """Return concatenated `<brm-sidecar>` block for `role`, or '' if no layers.
 
-    Global layer (`<home>/.claude/brm/sidecars/<role>.md`) is emitted first,
-    project layer (`<project_root>/.brm/sidecars/<role>.md`) second. Layers
-    that don't exist or can't be read are skipped silently. If neither
-    layer contributes, returns an empty string.
+    Layers emitted in order: global, orchestrator, project. Each layer is
+    looked up at its scoped path and silently dropped if missing or unreadable.
+    If no layer contributes, returns an empty string.
     """
     global_path = Path(home) / ".claude" / "brm" / "sidecars" / f"{role}.md"
+    orchestrator_path = (
+        Path(orchestrator_root) / ".brm" / "sidecars" / f"{role}.md"
+        if orchestrator_root
+        else None
+    )
     project_path = (
         Path(project_root) / ".brm" / "sidecars" / f"{role}.md"
         if project_root
@@ -67,6 +75,15 @@ def load_sidecar(
         if body is not None:
             parts.append(
                 f'  <layer scope="global" path="~/.claude/brm/sidecars/{role}.md">\n'
+                f"{body.rstrip(chr(10))}\n"
+                f"  </layer>"
+            )
+
+    if orchestrator_path is not None and orchestrator_path.is_file():
+        body = _read_layer(orchestrator_path)
+        if body is not None:
+            parts.append(
+                f'  <layer scope="orchestrator" path=".brm/sidecars/{role}.md">\n'
                 f"{body.rstrip(chr(10))}\n"
                 f"  </layer>"
             )
