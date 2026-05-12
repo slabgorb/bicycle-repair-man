@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""BRM multi-repo CLI.
+
+Eight subcommands:
+  init [--from-pf] [--force]
+  list [--json]
+  topology [--json]
+  describe NAME [--json]
+  owns PATH
+  status [--brief] [--json]
+  snapshot [--label LABEL]
+  branch NAME [--repos all|csv]
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shlex
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PLUGIN_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PLUGIN_ROOT))
+
+from lib import orchestrator as _orch  # noqa: E402
+
+
+STARTER_YAML = """\
+# BRM repos config — see docs/orchestrator-schema.md
+repos:
+  example:
+    path: example
+    type: lib
+    description: Replace with your repos
+    default_branch: main
+    test_command: ""
+    lint_command: ""
+    build_command: ""
+"""
+
+
+def _resolve_orchestrator_root(cwd: Path) -> Path | None:
+    override = os.environ.get("BRM_ORCHESTRATOR_ROOT")
+    if override:
+        candidate = Path(override)
+        if (candidate / ".brm" / "repos.yaml").is_file():
+            return candidate
+        return None
+    return _orch.find_orchestrator_root(cwd)
+
+
+def _die(msg: str, code: int = 1) -> None:
+    print(f"brm-repos: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# --- init -----------------------------------------------------------------
+
+def cmd_init(args: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    target = cwd / ".brm" / "repos.yaml"
+    if target.exists() and not args.force:
+        _die(f"{target} already exists; pass --force to overwrite")
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.from_pf:
+        pf_path = cwd / ".pennyfarthing" / "repos.yaml"
+        if not pf_path.is_file():
+            _die(f"no .pennyfarthing/repos.yaml found at {pf_path}")
+        try:
+            text = pf_path.read_text(encoding="utf-8", errors="replace")
+            content, dropped = _translate_pf(text)
+        except _orch.RepoConfigError as e:
+            _die(f"could not parse {pf_path}: {e}")
+        target.write_text(content)
+        if dropped:
+            print(
+                f"brm-repos: dropped {len(dropped)} PF-only field(s); "
+                f"see docs/orchestrator-schema.md",
+                file=sys.stderr,
+            )
+        return 0
+
+    target.write_text(STARTER_YAML)
+    print(f"created {target}")
+    return 0
+
+
+_PF_ONLY_PER_REPO = {
+    "owns", "never_edit", "symlinks", "ui_layer", "components_path",
+    "branch_strategy", "language", "notes",
+}
+_PF_ONLY_TOP = {"pr_title_format", "gates"}
+
+
+def _translate_pf(pf_text: str) -> tuple[str, list[str]]:
+    """Translate a PF repos.yaml to BRM schema. Returns (yaml_text, dropped_fields)."""
+    import yaml
+    doc = yaml.safe_load(pf_text)
+    if not isinstance(doc, dict) or "repos" not in doc:
+        raise _orch.RepoConfigError("PF repos.yaml missing `repos` key")
+
+    dropped: list[str] = []
+    for key in list(doc.keys()):
+        if key in _PF_ONLY_TOP:
+            dropped.append(key)
+
+    out_repos: dict[str, dict] = {}
+    for name, raw in doc.get("repos", {}).items():
+        if not isinstance(raw, dict):
+            continue
+        for k in list(raw.keys()):
+            if k in _PF_ONLY_PER_REPO:
+                dropped.append(f"repos.{name}.{k}")
+        out_repos[str(name)] = {
+            "path": str(raw.get("path", name)),
+            "type": str(raw.get("type", "lib")),
+            "description": str(raw.get("description", "")),
+            "default_branch": str(raw.get("default_branch", "main")),
+            "test_command": str(raw.get("test_command", "")),
+            "lint_command": str(raw.get("lint_command", "")),
+            "build_command": str(raw.get("build_command", "")),
+        }
+    return yaml.safe_dump({"repos": out_repos}, sort_keys=False), dropped
+
+
+# --- list / topology / describe / owns -----------------------------------
+# (implemented in later tasks)
+
+
+# --- status / snapshot / branch ------------------------------------------
+# (implemented in later tasks)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="brm-repos", description="BRM multi-repo CLI")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    p_init = sub.add_parser("init", help="Create .brm/repos.yaml in cwd")
+    p_init.add_argument("--from-pf", action="store_true",
+                        help="Import from cwd/.pennyfarthing/repos.yaml")
+    p_init.add_argument("--force", action="store_true",
+                        help="Overwrite an existing repos.yaml")
+    p_init.set_defaults(func=cmd_init)
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
