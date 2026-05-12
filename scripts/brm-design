@@ -162,8 +162,91 @@ def _cwd_repo_name(cwd: Path) -> str | None:
 # Subcommand stubs — real implementations land in later tasks.
 
 def cmd_init(args) -> int:
-    print("brm-design init: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    designs_dir = _designs_dir(cwd)
+    designs_dir.mkdir(parents=True, exist_ok=True)
+
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    filename = f"{today}-{args.slug}.md"
+    target = designs_dir / filename
+
+    if target.exists() and not args.force:
+        print(f"brm-design init: {target} exists; use --force to overwrite",
+              file=sys.stderr)
+        return EXIT_RUNTIME
+
+    orch = _orch.find_orchestrator_root(cwd)
+    plugin_root = PLUGIN_ROOT
+    try:
+        wf = _workflow.load_workflow(
+            args.workflow, plugin_root=plugin_root, orchestrator_root=orch,
+        )
+    except _workflow.WorkflowSchemaError as e:
+        print(f"brm-design init: {e}", file=sys.stderr)
+        return EXIT_RUNTIME
+
+    repos = _resolve_repos_arg(args.repos, cwd, orch)
+    if not repos:
+        print("brm-design init: no repos resolved (pass --repos)", file=sys.stderr)
+        return EXIT_RUNTIME
+
+    expanded = _workflow.expand_phases(wf, repos)
+    now = _now_iso()
+
+    # First phase starts immediately on init. The "planned" status is reserved
+    # for future template-style designs; for now, creating a design means
+    # starting work on it.
+    phases = []
+    for i, wp in enumerate(expanded):
+        is_first = (i == 0)
+        phases.append({
+            "name": wp.name,
+            **({"repo": wp.repo} if wp.repo else {}),
+            **({"repos": wp.repos} if wp.repos else {}),
+            "status": "in-progress" if is_first else "planned",
+            "started": now if is_first else None,
+            "finished": None,
+            "handoff": None,
+            "gate_result": None,
+        })
+
+    frontmatter = {
+        "design": f"{today}-{args.slug}",
+        "created": now,
+        "workflow": args.workflow,
+        "repos": repos,
+        "description": args.description,
+        "status": "in-progress",
+        "current_phase": expanded[0].name,
+        "phases": phases,
+        "history": [
+            {"at": now, "event": "phase-start", "phase": expanded[0].name,
+             "actor": expanded[0].agent},
+        ],
+    }
+
+    import yaml as _yaml
+    fm_text = _yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True,
+                              default_flow_style=False)
+    body = (
+        f"\n# {args.slug} — Design\n\n"
+        f"## Context\n\n{args.description or 'TBD'}\n\n"
+        f"## Acceptance Criteria\n\n- [ ] TBD\n\n"
+        f"## Handoffs\n\n"
+    )
+    target.write_text(f"---\n{fm_text}---\n{body}", encoding="utf-8")
+    print(str(target))
+    return EXIT_OK
+
+
+def _resolve_repos_arg(repos_arg: str | None, cwd: Path, orch: Path | None) -> list[str]:
+    if repos_arg:
+        return [r.strip() for r in repos_arg.split(",") if r.strip()]
+    if not orch:
+        return []
+    name = _cwd_repo_name(cwd)
+    return [name] if name else []
 
 
 def cmd_status(args) -> int:

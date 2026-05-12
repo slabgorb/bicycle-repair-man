@@ -54,3 +54,66 @@ def test_help_exits_zero(orch: Path):
 def test_unknown_subcommand_exits_2(orch: Path):
     r = _run(["bogus"], cwd=orch)
     assert r.returncode == 2
+
+
+def _load_fm(path: Path) -> dict:
+    """Read a design file and return its parsed frontmatter dict."""
+    import yaml as _yaml
+    text = path.read_text(encoding="utf-8")
+    fm_text = text.split("---", 2)[1]
+    return _yaml.safe_load(fm_text)
+
+
+def test_init_single_repo(orch: Path):
+    r = _run(
+        ["init", "x", "--workflow", "tdd", "--repos", "api"],
+        cwd=orch / "api",
+    )
+    assert r.returncode == 0, r.stderr
+    designs = list((orch / "docs" / "superpowers" / "designs").glob("*-x.md"))
+    assert len(designs) == 1
+    fm = _load_fm(designs[0])
+    assert fm["workflow"] == "tdd"
+    assert fm["repos"] == ["api"]
+    assert fm["status"] == "in-progress"  # init starts the design
+    assert fm["current_phase"] == "red-api"
+    assert fm["phases"][0]["status"] == "in-progress"
+    assert fm["phases"][0]["started"] is not None
+    assert any(p["name"] == "red-api" for p in fm["phases"])
+    assert any(p["name"] == "green-api" for p in fm["phases"])
+
+
+def test_init_multi_repo(orch: Path):
+    r = _run(
+        ["init", "y", "--workflow", "tdd", "--repos", "api,ui"],
+        cwd=orch,
+    )
+    assert r.returncode == 0, r.stderr
+    designs = list((orch / "docs" / "superpowers" / "designs").glob("*-y.md"))
+    fm = _load_fm(designs[0])
+    names = [p["name"] for p in fm["phases"]]
+    assert names == ["red-api", "red-ui", "green-api", "green-ui", "review", "finish"]
+    review = next(p for p in fm["phases"] if p["name"] == "review")
+    assert review["repos"] == ["api", "ui"]
+
+
+def test_init_refuses_existing_without_force(orch: Path):
+    args = ["init", "z", "--workflow", "tdd", "--repos", "api"]
+    r1 = _run(args, cwd=orch)
+    assert r1.returncode == 0, r1.stderr
+    r2 = _run(args, cwd=orch)
+    assert r2.returncode == 1
+    assert "exists" in r2.stderr.lower()
+
+
+def test_init_force_overwrites(orch: Path):
+    args = ["init", "w", "--workflow", "tdd", "--repos", "api"]
+    _run(args, cwd=orch)
+    r = _run(args + ["--force"], cwd=orch)
+    assert r.returncode == 0, r.stderr
+
+
+def test_init_unknown_workflow(orch: Path):
+    r = _run(["init", "q", "--workflow", "no-such", "--repos", "api"], cwd=orch)
+    assert r.returncode == 1
+    assert "not found" in r.stderr.lower()
