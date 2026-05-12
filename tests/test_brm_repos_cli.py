@@ -155,3 +155,109 @@ def test_commands_require_orchestrator_workspace(tmp_path: Path) -> None:
     proc = _run(["list"], cwd=tmp_path)
     assert proc.returncode == 1
     assert "orchestrator" in (proc.stderr + proc.stdout).lower()
+
+
+# --- status / snapshot / branch -------------------------------------------
+
+def _git_init_repo(path: Path, *, default_branch: str = "main") -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", default_branch, str(path)], check=True)
+    (path / "README.md").write_text(f"# {path.name}\n")
+    subprocess.run(["git", "-C", str(path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.email=a@b.c", "-c", "user.name=t",
+         "commit", "-q", "-m", "init"], check=True
+    )
+
+
+def _build_orch_with_git_repos(root: Path) -> None:
+    (root / ".brm").mkdir(parents=True)
+    (root / ".brm" / "repos.yaml").write_text("""\
+repos:
+  api:
+    path: api
+    type: api
+    default_branch: main
+    test_command: ""
+    lint_command: ""
+  ui:
+    path: ui
+    type: ui
+    default_branch: main
+    test_command: ""
+    lint_command: ""
+""")
+    _git_init_repo(root / "api")
+    _git_init_repo(root / "ui")
+
+
+def test_status_clean_exits_zero(tmp_path: Path) -> None:
+    _build_orch_with_git_repos(tmp_path)
+    proc = _run(["status"], cwd=tmp_path, env_extra=_orch_env(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+    assert "api" in proc.stdout
+    assert "ui" in proc.stdout
+
+
+def test_status_dirty_exits_one(tmp_path: Path) -> None:
+    _build_orch_with_git_repos(tmp_path)
+    (tmp_path / "api" / "scratch.txt").write_text("uncommitted\n")
+    proc = _run(["status"], cwd=tmp_path, env_extra=_orch_env(tmp_path))
+    assert proc.returncode == 1
+
+
+def test_status_brief_one_line_per_repo(tmp_path: Path) -> None:
+    _build_orch_with_git_repos(tmp_path)
+    proc = _run(["status", "--brief"], cwd=tmp_path, env_extra=_orch_env(tmp_path))
+    assert proc.returncode == 0
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    # one line per repo (≥2 lines; allow a header)
+    assert any("api" in ln for ln in lines)
+    assert any("ui" in ln for ln in lines)
+
+
+def test_snapshot_creates_branches_in_dirty_repos(tmp_path: Path) -> None:
+    _build_orch_with_git_repos(tmp_path)
+    (tmp_path / "api" / "scratch.txt").write_text("work in progress\n")
+    proc = _run(["snapshot", "--label", "wip"], cwd=tmp_path,
+                env_extra=_orch_env(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+    api_branches = subprocess.run(
+        ["git", "-C", str(tmp_path / "api"), "branch", "--list"],
+        capture_output=True, text=True, check=True
+    ).stdout
+    ui_branches = subprocess.run(
+        ["git", "-C", str(tmp_path / "ui"), "branch", "--list"],
+        capture_output=True, text=True, check=True
+    ).stdout
+    assert "snapshot/" in api_branches and "wip" in api_branches
+    assert "snapshot/" not in ui_branches  # ui was clean
+
+
+def test_branch_creates_in_all_repos(tmp_path: Path) -> None:
+    _build_orch_with_git_repos(tmp_path)
+    proc = _run(["branch", "feat/x"], cwd=tmp_path, env_extra=_orch_env(tmp_path))
+    assert proc.returncode == 0, proc.stderr
+    for repo in ("api", "ui"):
+        out = subprocess.run(
+            ["git", "-C", str(tmp_path / repo), "branch", "--list", "feat/x"],
+            capture_output=True, text=True, check=True
+        ).stdout
+        assert "feat/x" in out, f"{repo}: branch not created"
+
+
+def test_branch_repos_filter_csv(tmp_path: Path) -> None:
+    _build_orch_with_git_repos(tmp_path)
+    proc = _run(["branch", "feat/api-only", "--repos", "api"], cwd=tmp_path,
+                env_extra=_orch_env(tmp_path))
+    assert proc.returncode == 0
+    api_out = subprocess.run(
+        ["git", "-C", str(tmp_path / "api"), "branch", "--list", "feat/api-only"],
+        capture_output=True, text=True, check=True
+    ).stdout
+    ui_out = subprocess.run(
+        ["git", "-C", str(tmp_path / "ui"), "branch", "--list", "feat/api-only"],
+        capture_output=True, text=True, check=True
+    ).stdout
+    assert "feat/api-only" in api_out
+    assert "feat/api-only" not in ui_out

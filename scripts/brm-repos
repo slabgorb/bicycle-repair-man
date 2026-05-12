@@ -216,7 +216,153 @@ def cmd_owns(args: argparse.Namespace) -> int:
 
 
 # --- status / snapshot / branch ------------------------------------------
-# (implemented in later tasks)
+
+def _git(repo_path: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(repo_path), *args],
+        capture_output=True, text=True
+    )
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    root, repos, _ = _require_orch_root()
+    rows: list[dict] = []
+    any_dirty = False
+    for r in repos.values():
+        repo_path = root / r.path
+        if not (repo_path / ".git").exists():
+            rows.append({"name": r.name, "missing": True})
+            continue
+        branch = _git(repo_path, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        porcelain = _git(repo_path, "status", "--porcelain").stdout
+        dirty = bool(porcelain.strip())
+        # Unpushed: any commit on HEAD not on upstream
+        upstream = _git(repo_path, "rev-parse", "--abbrev-ref", "@{u}").stdout.strip()
+        unpushed = False
+        if upstream:
+            unpushed = bool(
+                _git(repo_path, "log", "@{u}..HEAD", "--oneline").stdout.strip()
+            )
+        rows.append({
+            "name": r.name, "branch": branch, "dirty": dirty,
+            "unpushed": unpushed, "missing": False,
+        })
+        if dirty or unpushed:
+            any_dirty = True
+
+    if args.json:
+        import json as _json
+        print(_json.dumps(rows))
+    elif args.brief:
+        for row in rows:
+            if row.get("missing"):
+                print(f"{row['name']:20s} MISSING")
+            else:
+                flags = ("*" if row["dirty"] else " ") + ("↑" if row["unpushed"] else " ")
+                print(f"{row['name']:20s} {row['branch']:24s} {flags}")
+    else:
+        for row in rows:
+            if row.get("missing"):
+                print(f"== {row['name']} (missing on disk) ==")
+                continue
+            print(f"== {row['name']} ({row['branch']}) ==")
+            if row["dirty"]:
+                print(f"  dirty: uncommitted changes")
+            if row["unpushed"]:
+                print(f"  unpushed: commits ahead of upstream")
+            if not row["dirty"] and not row["unpushed"]:
+                print("  clean")
+    return 1 if any_dirty else 0
+
+
+def cmd_snapshot(args: argparse.Namespace) -> int:
+    root, repos, _ = _require_orch_root()
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    label = args.label or "snap"
+    branch_name = f"snapshot/{ts}-{label}"
+    had_dirty = False
+    errors = []
+    for r in repos.values():
+        repo_path = root / r.path
+        if not (repo_path / ".git").exists():
+            continue
+        if not _git(repo_path, "status", "--porcelain").stdout.strip():
+            continue  # clean
+        had_dirty = True
+        original = _git(repo_path, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        steps = [
+            ("switch", "-c", branch_name),
+            ("add", "-A"),
+            ("-c", "user.email=brm@local", "-c", "user.name=brm",
+             "commit", "-q", "-m", f"snapshot: {label}"),
+            ("switch", original),
+        ]
+        for s in steps:
+            res = _git(repo_path, *s)
+            if res.returncode != 0:
+                errors.append(f"{r.name}: {' '.join(s)}: {res.stderr.strip()}")
+                break
+        else:
+            print(f"snapshot: {r.name} → {branch_name}")
+    if errors:
+        for e in errors:
+            print(e, file=sys.stderr)
+        return 1
+    if not had_dirty:
+        print("snapshot: all repos clean; nothing to snapshot")
+    return 0
+
+
+def cmd_branch(args: argparse.Namespace) -> int:
+    root, repos, _ = _require_orch_root()
+    selected = _select_repos(repos, args.repos)
+    errors = []
+    for r in selected:
+        repo_path = root / r.path
+        if not (repo_path / ".git").exists():
+            errors.append(f"{r.name}: missing on disk")
+            continue
+        # Refuse if branch already exists.
+        existing = _git(repo_path, "branch", "--list", args.name).stdout.strip()
+        if existing:
+            errors.append(f"{r.name}: branch {args.name} already exists")
+            continue
+        # Best-effort fetch; ignore failures (no upstream is fine for tests).
+        _git(repo_path, "fetch", "origin", r.default_branch)
+        # Branch from current default_branch (or current HEAD if no origin tracking).
+        base = r.default_branch
+        # Prefer origin/<default> if it exists, else local <default>, else HEAD.
+        ref = None
+        if _git(repo_path, "rev-parse", "--verify", f"origin/{base}").returncode == 0:
+            ref = f"origin/{base}"
+        elif _git(repo_path, "rev-parse", "--verify", base).returncode == 0:
+            ref = base
+        else:
+            ref = "HEAD"
+        res = _git(repo_path, "switch", "-c", args.name, ref)
+        if res.returncode != 0:
+            errors.append(f"{r.name}: {res.stderr.strip()}")
+        else:
+            print(f"branch: {r.name} → {args.name} (from {ref})")
+    if errors:
+        for e in errors:
+            print(e, file=sys.stderr)
+        return 1
+    return 0
+
+
+def _select_repos(
+    repos: dict[str, _orch.RepoConfig], spec: str
+) -> list[_orch.RepoConfig]:
+    if spec == "all":
+        return list(repos.values())
+    names = [s.strip() for s in spec.split(",") if s.strip()]
+    selected = []
+    for n in names:
+        if n not in repos:
+            _die(f"unknown repo: {n}", code=2)
+        selected.append(repos[n])
+    return selected
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -246,6 +392,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_owns = sub.add_parser("owns", help="Print short-name of repo containing PATH")
     p_owns.add_argument("path")
     p_owns.set_defaults(func=cmd_owns)
+
+    p_status = sub.add_parser("status", help="Show git status for all repos")
+    p_status.add_argument("--brief", action="store_true")
+    p_status.add_argument("--json", action="store_true")
+    p_status.set_defaults(func=cmd_status)
+
+    p_snap = sub.add_parser("snapshot", help="Safety branch + commit in dirty repos")
+    p_snap.add_argument("--label", default="snap")
+    p_snap.set_defaults(func=cmd_snapshot)
+
+    p_branch = sub.add_parser("branch", help="Create branch across selected repos")
+    p_branch.add_argument("name")
+    p_branch.add_argument("--repos", default="all",
+                          help="'all' or comma-separated repo names")
+    p_branch.set_defaults(func=cmd_branch)
 
     return p
 
