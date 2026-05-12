@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re as _re
 import sys
 from pathlib import Path
 
@@ -25,6 +26,11 @@ from lib import workflow as _workflow   # noqa: E402
 EXIT_OK = 0
 EXIT_RUNTIME = 1
 EXIT_USAGE = 2
+
+_HANDOFF_OPEN_RE = _re.compile(
+    r'<handoff\s+from="([^"]+)"\s+to="([^"]+)"\s+repo="([^"]+)"\s+'
+    r'agent="([^"]+)"\s+at="([^"]+)"\s*>'
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -308,8 +314,45 @@ def _next_phase_name(d: _design.Design) -> str | None:
 
 
 def cmd_handoff(args) -> int:
-    print("brm-design handoff: not implemented yet", file=sys.stderr)
-    return EXIT_RUNTIME
+    cwd = Path.cwd()
+    path = _resolve_design_path(args.design_path, cwd)
+    d = _read_design(path)
+
+    if args.from_phase not in (p.name for p in d.phases):
+        print(f"brm-design handoff: phase '{args.from_phase}' not in design",
+              file=sys.stderr)
+        return EXIT_RUNTIME
+
+    if args.stdin:
+        body = sys.stdin.read()
+    else:
+        body = Path(args.file).read_text(encoding="utf-8")
+
+    m = _HANDOFF_OPEN_RE.search(body)
+    if not m:
+        print("brm-design handoff: input is not a valid <handoff> block",
+              file=sys.stderr)
+        return EXIT_RUNTIME
+    if m.group(1) != args.from_phase or m.group(2) != args.to_phase:
+        print(
+            f"brm-design handoff: <handoff> attributes (from='{m.group(1)}', "
+            f"to='{m.group(2)}') do not match flags",
+            file=sys.stderr,
+        )
+        return EXIT_RUNTIME
+
+    anchor_id = f"handoffs/{args.from_phase}"
+    new_block = (
+        f"### {args.from_phase} {{#{anchor_id}}}\n"
+        f"{body.rstrip()}\n\n"
+    )
+    if "## Handoffs" not in d.body:
+        d.body += "\n## Handoffs\n\n"
+    d.body = d.body.rstrip() + "\n\n" + new_block
+
+    d.phase(args.from_phase).handoff = f"#{anchor_id}"
+    _write_design_atomic(d, path)
+    return EXIT_OK
 
 
 def cmd_gate(args) -> int:

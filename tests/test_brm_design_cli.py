@@ -153,3 +153,50 @@ def test_status_no_active_returns_2(orch: Path):
     r = _run(["status"], cwd=orch / "api")
     assert r.returncode == 2
     assert "no active design" in r.stderr.lower()
+
+
+SAMPLE_HANDOFF = (
+    '<handoff from="red-api" to="green-api" repo="api" agent="tea" '
+    'at="2026-05-12T10:00:00-04:00">\n'
+    'Summary: 3 failing tests added.\n'
+    'Test status: failing=3 passing=0 skipped=0\n'
+    '</handoff>\n'
+)
+
+
+def test_handoff_inserts_anchor(orch: Path):
+    _run(["init", "h", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-h.md"))
+    r = _run(
+        ["handoff", str(design_path), "--from", "red-api", "--to", "green-api", "--stdin"],
+        cwd=orch, input_text=SAMPLE_HANDOFF,
+    )
+    assert r.returncode == 0, r.stderr
+    text = design_path.read_text()
+    assert "{#handoffs/red-api}" in text
+    assert "Summary: 3 failing tests" in text
+    assert 'handoff: "#handoffs/red-api"' in text or "handoff: '#handoffs/red-api'" in text
+
+
+def test_handoff_rejects_malformed_xml(orch: Path):
+    _run(["init", "h2", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-h2.md"))
+    r = _run(
+        ["handoff", str(design_path), "--from", "red-api", "--to", "green-api", "--stdin"],
+        cwd=orch, input_text="not a handoff\n",
+    )
+    assert r.returncode == 1
+    assert "handoff" in r.stderr.lower()
+
+
+def test_handoff_from_file(orch: Path, tmp_path: Path):
+    _run(["init", "hf", "--workflow", "tdd", "--repos", "api"], cwd=orch)
+    design_path = next((orch / "docs" / "superpowers" / "designs").glob("*-hf.md"))
+    hf = tmp_path / "h.xml"
+    hf.write_text(SAMPLE_HANDOFF)
+    r = _run(
+        ["handoff", str(design_path), "--from", "red-api", "--to", "green-api",
+         "--file", str(hf)],
+        cwd=orch,
+    )
+    assert r.returncode == 0, r.stderr
