@@ -79,3 +79,22 @@ def parse_repos_yaml(text: str) -> dict[str, RepoConfig]:
             build_command=str(raw.get("build_command", "")),
         )
     return out
+
+
+_ORCHESTRATOR_WALK_CAP = 20
+
+
+def find_orchestrator_root(cwd: Path) -> Path | None:
+    """Return nearest ancestor of `cwd` containing `.brm/repos.yaml` (file), else None.
+
+    Walks at most _ORCHESTRATOR_WALK_CAP levels above cwd.
+    """
+    current = Path(cwd).resolve()
+    for _ in range(_ORCHESTRATOR_WALK_CAP + 1):
+        candidate = current / ".brm" / "repos.yaml"
+        if candidate.is_file():
+            return current
+        if current.parent == current:
+            return None
+        current = current.parent
+    return None
