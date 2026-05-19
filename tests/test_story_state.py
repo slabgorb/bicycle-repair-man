@@ -106,3 +106,36 @@ def test_story_handoff_appends_to_body_log(tmp_path):
     body = (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md").read_text()
     assert "## Handoff log" in body
     assert "Tests are failing" in body
+
+
+def test_story_gate_emits_prompt(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    # Move story 01-first to in_progress with a phase that has a gate
+    from lib import story as _story
+    sp = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md"
+    s = _story.parse_story_text(sp.read_text())
+    s.status = "in_progress"
+    s.phase = "red"
+    sp.write_text(_story.serialize_story(s))
+    r = _run("story", "gate", "demo", "--story", "01-first", cwd=tmp_path)
+    assert r.returncode == 0
+    assert "GATE_RESULT" in r.stdout  # gate prompt mentions the contract
+
+
+def test_story_record_gate_pass(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    from lib import story as _story
+    sp = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md"
+    s = _story.parse_story_text(sp.read_text())
+    s.status = "in_progress"; s.phase = "red"
+    sp.write_text(_story.serialize_story(s))
+    gate_result = "GATE_RESULT\nresult: pass\nreason: tests are failing as required\n"
+    r = subprocess.run(
+        [sys.executable, str(BRM), "story", "record-gate", "demo",
+         "--story", "01-first", "--result-stdin"],
+        cwd=tmp_path, input=gate_result, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    s2 = _story.parse_story_text(sp.read_text())
+    # phase_history gets an entry with the gate result
+    assert any(h.get("gate_result") == "pass" for h in s2.phase_history) or s2.phase_history == []

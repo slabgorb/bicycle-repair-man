@@ -4,11 +4,14 @@ from __future__ import annotations
 import argparse
 import re as _re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from lib import epic as _epic
+from lib import gate as _gate
 from lib import plan as _plan
 from lib import story as _story
+from lib import workflow as _workflow_mod
 
 
 def _find_dispatcher():
@@ -294,6 +297,67 @@ def dispatch_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_gate_file(workflow_name: str, phase_name: str) -> Path | None:
+    plugin_root = Path(__file__).resolve().parent.parent
+    wf = _workflow_mod.load_workflow(workflow_name, plugin_root=plugin_root)
+    for ph in wf.phases:
+        if ph.name == phase_name and ph.gate:
+            gate_file = plugin_root / f"{ph.gate.file}.md"
+            if gate_file.is_file():
+                return gate_file
+    return None
+
+
+def dispatch_gate(args: argparse.Namespace) -> int:
+    try:
+        slug = _resolve_story_slug(args.epic_slug, args.story_slug)
+        s = _load_story(args.epic_slug, slug)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr); return 1
+    if not s.phase:
+        print("story has no active phase", file=sys.stderr); return 1
+    gate_file = _resolve_gate_file(s.workflow, s.phase)
+    if gate_file is None:
+        print(f"phase '{s.phase}' has no gate defined", file=sys.stderr); return 1
+    print(gate_file.read_text())
+    return 0
+
+
+_GATE_RESULT_RE = _re.compile(
+    r"GATE_RESULT\s*\n\s*result:\s*(pass|fail|skip)", _re.IGNORECASE
+)
+
+
+def dispatch_record_gate(args: argparse.Namespace) -> int:
+    try:
+        slug = _resolve_story_slug(args.epic_slug, args.story_slug)
+        s = _load_story(args.epic_slug, slug)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr); return 1
+    if args.result_stdin:
+        text = sys.stdin.read()
+    else:
+        text = Path(args.result_file).read_text()
+    m = _GATE_RESULT_RE.search(text)
+    if not m:
+        print("no GATE_RESULT block found", file=sys.stderr); return 1
+    result = m.group(1).lower()
+    now = datetime.now(timezone.utc).isoformat()
+    # Find or create the current phase history entry.
+    cur = None
+    for h in s.phase_history:
+        if h.get("phase") == s.phase and h.get("exited") is None:
+            cur = h; break
+    if cur is None:
+        cur = {"phase": s.phase, "entered": now, "exited": None, "gate_result": None}
+        s.phase_history.append(cur)
+    cur["exited"] = now
+    cur["gate_result"] = result
+    _save_story(args.epic_slug, s)
+    print(f"gate result recorded: {result}")
+    return 0
+
+
 def _register() -> None:
     """Append story-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -334,13 +398,29 @@ def _register() -> None:
         src.add_argument("--file", default=None)
         src.add_argument("--stdin", action="store_true")
 
+    def _add_gate(verb_subs):
+        p = verb_subs.add_parser("gate", help="Emit gate prompt for the current phase")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+
+    def _add_record_gate(verb_subs):
+        p = verb_subs.add_parser("record-gate", help="Record GATE_RESULT for the current phase")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+        src = p.add_mutually_exclusive_group(required=True)
+        src.add_argument("--result-stdin", action="store_true")
+        src.add_argument("--result-file", default=None)
+
     _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
     _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
     _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
     _switch_name = f"{_add_switch.__module__}.{_add_switch.__qualname__}"
     _handoff_name = f"{_add_handoff.__module__}.{_add_handoff.__qualname__}"
+    _gate_name = f"{_add_gate.__module__}.{_add_gate.__qualname__}"
+    _record_gate_name = f"{_add_record_gate.__module__}.{_add_record_gate.__qualname__}"
     _dedup_names = (
-        _split_name, _list_name, _describe_name, _status_name, _switch_name, _handoff_name
+        _split_name, _list_name, _describe_name, _status_name, _switch_name,
+        _handoff_name, _gate_name, _record_gate_name,
     )
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
@@ -359,6 +439,10 @@ def _register() -> None:
     handler.dispatch_switch = dispatch_switch
     handler.add_subparsers.append(_add_handoff)
     handler.dispatch_handoff = dispatch_handoff
+    handler.add_subparsers.append(_add_gate)
+    handler.dispatch_gate = dispatch_gate
+    handler.add_subparsers.append(_add_record_gate)
+    setattr(handler, "dispatch_record-gate", dispatch_record_gate)
 
 
 _register()
