@@ -80,6 +80,24 @@ def test_hook_non_match_still_zero_io(tmp_path):
     assert out == {} or out.get("hookSpecificOutput", {}).get("additionalContext", "") == ""
 
 
+def test_hook_skips_done_epic_when_only_one_exists(tmp_path):
+    _bootstrap_active_epic(tmp_path)
+    # Finish the epic
+    BRM = PLUGIN_ROOT / "scripts" / "brm"
+    # First need to mark the story done to allow finish
+    from lib import story as _story_mod, epic as _epic_mod
+    sp = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md"
+    s = _story_mod.parse_story_text(sp.read_text())
+    s.status = "done"; sp.write_text(_story_mod.serialize_story(s))
+    subprocess.run([sys.executable, str(BRM), "epic", "finish", "demo"],
+                   cwd=tmp_path, check=True)
+    # Now epic is done; hook should NOT inject epic block
+    r = _run_hook("/pm review this", cwd=tmp_path)
+    out = json.loads(r.stdout)
+    ctx = out.get("hookSpecificOutput", {}).get("additionalContext", "") or ""
+    assert "<brm-epic>" not in ctx
+
+
 def test_cli_story_override_does_not_change_pointer(tmp_path):
     """Regression: `brm story describe --story <other>` must be read-only.
 

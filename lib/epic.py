@@ -169,7 +169,9 @@ def find_active_epic(start: "Path", *, max_levels: int = 20) -> "tuple[Epic, Pat
                     e = parse_epic_text(ef.read_text())
                 except EpicSchemaError:
                     continue
-                priority = {"active": 0, "draft": 2, "done": 3}.get(e.status, 4)
+                if e.status == "done":
+                    continue
+                priority = {"active": 0, "draft": 2}.get(e.status, 4)
                 if e.status == "active" and e.current_story:
                     priority = -1  # most preferred
                 candidates.append((priority, e.slug, e, d))

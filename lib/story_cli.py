@@ -458,6 +458,10 @@ def dispatch_unblock(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr); return 1
     if s.status != "blocked":
         print(f"story '{slug}' is not blocked", file=sys.stderr); return 1
+    # TODO(v0.5): preserve pre-block status — a story in `review` before being
+    # blocked returns as `in_progress` here. Fixing this requires storing the
+    # pre-block status (e.g. a new optional field or a phase_history annotation)
+    # without breaking the existing dataclass schema; deferred to v0.5.
     s.status = "in_progress" if s.phase else "draft"
     s.blocked_reason = None
     _save_story(args.epic_slug, s)
