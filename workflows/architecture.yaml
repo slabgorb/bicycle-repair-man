@@ -1,20 +1,12 @@
 workflow:
   name: architecture
-  description: Architecture work; all phases unscoped (operate across the design).
-  version: "0.3.0"
-  expansion: per-repo
-  phases:
-    - name: research
-      agent: architect
-    - name: propose
-      agent: architect
-    - name: approve
-      agent: reviewer
-      gate:
-        file: gates/approval
-    - name: finish
-      agent: pm
-      gate:
-        file: gates/design-complete
+  description: Collaborative architectural decision-making (stepped).
+  version: "0.4.0"
+  type: stepped
+  agent: architect
+  steps:
+    path: ./architecture/steps/
+    pattern: 'step-{nn}-*.md'
   triggers:
+    types: [architecture, design, adr]
     default: false

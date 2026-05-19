@@ -13,6 +13,13 @@ Eight subcommands:
 """
 from __future__ import annotations
 
+import sys as _sys  # noqa: E402
+
+_sys.stderr.write(
+    "[deprecated] brm-repos is the v0.3 CLI; v0.4 unifies to `brm <noun> <verb>`.\n"
+    "Use `brm repos ...` instead. See: brm help migration.\n"
+)
+
 import argparse
 import os
 import shlex

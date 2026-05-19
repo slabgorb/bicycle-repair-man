@@ -1,6 +1,7 @@
 """Unit tests for lib/workflow.py."""
 from __future__ import annotations
 
+import shutil
 import textwrap
 from pathlib import Path
 
@@ -12,8 +13,11 @@ from lib.workflow import (
     WorkflowSchemaError,
     expand_phases,
     load_workflow,
+    load_workflow_file,
     validate_workflow,
 )
+
+_REAL_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 VALID_TDD = textwrap.dedent("""\
     workflow:
@@ -46,6 +50,10 @@ def _write_workflow(root: Path, name: str, content: str) -> Path:
     p = root / "workflows" / f"{name}.yaml"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content)
+    # Copy the built-in agents so the tmp plugin_root has valid agent definitions.
+    agents_dst = root / "agents"
+    if not agents_dst.exists():
+        shutil.copytree(_REAL_PLUGIN_ROOT / "agents", agents_dst)
     return p
 
 
@@ -119,11 +127,12 @@ def test_validate_rejects_each_on_repos(tmp_path: Path):
         load_workflow("tdd", plugin_root=tmp_path)
 
 
-def test_validate_rejects_reserved_expansion(tmp_path: Path):
-    bad = VALID_TDD.replace("expansion: per-repo", "expansion: as-written")
-    _write_workflow(tmp_path, "tdd", bad)
-    with pytest.raises(WorkflowSchemaError, match="as-written"):
-        load_workflow("tdd", plugin_root=tmp_path)
+def test_validate_accepts_as_written_expansion(tmp_path: Path):
+    """as-written expansion is now valid (v0.4+)."""
+    good = VALID_TDD.replace("expansion: per-repo", "expansion: as-written")
+    _write_workflow(tmp_path, "tdd", good)
+    wf = load_workflow("tdd", plugin_root=tmp_path)
+    assert wf.expansion == "as-written"
 
 
 def test_validate_duplicate_phase_names(tmp_path: Path):
@@ -206,8 +215,75 @@ def test_builtin_workflows_load():
     for name in ("tdd", "patch", "docs", "architecture"):
         wf = load_workflow(name, plugin_root=plugin_root)
         assert wf.name == name
-        assert wf.phases, f"{name} has no phases"
-        # All built-ins must end with a finish phase owned by pm.
-        last = wf.phases[-1]
-        assert last.name == "finish"
-        assert last.agent == "pm"
+        if wf.type == "stepped":
+            # Stepped workflows carry steps, not phases.
+            assert wf.steps, f"{name} has no steps"
+        else:
+            assert wf.phases, f"{name} has no phases"
+            # Phased built-ins must end with a finish phase owned by pm.
+            last = wf.phases[-1]
+            assert last.name == "finish"
+            assert last.agent == "pm"
+
+
+def test_workflow_with_custom_agent_passes_when_discovered(tmp_path):
+    """A workflow naming a custom agent should validate as long as the agent
+    file exists under .brm/agents/."""
+    from lib import workflow as _wf
+    custom_agents = tmp_path / ".brm" / "agents"
+    custom_agents.mkdir(parents=True)
+    (custom_agents / "security-reviewer.md").write_text(
+        "# Security Reviewer\n\n<role>\n**Kind:** tactical\n</role>\n"
+    )
+    wf_yaml = """
+workflow:
+  name: secflow
+  phases:
+    - { name: scan, agent: security-reviewer }
+"""
+    (tmp_path / "secflow.yaml").write_text(wf_yaml)
+    from pathlib import Path
+    plugin_root = Path(__file__).resolve().parent.parent
+    wf = _wf.load_workflow_file(tmp_path / "secflow.yaml", plugin_root=plugin_root,
+                                project_root=tmp_path)
+    assert wf.phases[0].agent == "security-reviewer"
+
+
+def test_workflow_with_unknown_agent_fails():
+    from lib import workflow as _wf
+    yml = """
+workflow:
+  name: bad
+  phases:
+    - { name: x, agent: ghost-agent }
+"""
+    import pytest
+    with pytest.raises(_wf.WorkflowSchemaError, match="ghost-agent"):
+        _wf._parse_workflow(yml)
+
+
+def test_manual_expansion_is_rejected():
+    from lib import workflow as _wf
+    import pytest
+    yml = """
+workflow:
+  name: x
+  expansion: manual
+  phases:
+    - { name: a, agent: pm }
+"""
+    with pytest.raises(_wf.WorkflowSchemaError, match="expansion"):
+        _wf._parse_workflow(yml)
+
+
+def test_as_written_expansion_accepted():
+    from lib import workflow as _wf
+    yml = """
+workflow:
+  name: x
+  expansion: as-written
+  phases:
+    - { name: a, agent: pm }
+"""
+    wf = _wf._parse_workflow(yml)
+    assert wf.expansion == "as-written"

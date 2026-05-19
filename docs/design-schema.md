@@ -110,3 +110,68 @@ All subcommands invoked via `${CLAUDE_PLUGIN_ROOT}/scripts/brm-design`.
 - `BRM_ACTIVE_DESIGN` — explicit design path (bypasses discovery).
 - `BRM_DESIGNS_DIR` — search root override (default: `<orchestrator>/docs/superpowers/designs/` or `<repo>/docs/superpowers/designs/`).
 - v0.2 env vars (`BRM_HOME`, `BRM_PROJECT_ROOT`, `BRM_ORCHESTRATOR_ROOT`) still apply.
+
+---
+
+## Epic frontmatter (v0.4)
+
+Epics replace the single-design file as the top-level work container. Frontmatter schema (YAML):
+
+```yaml
+schema: brm-epic/0.4              # required
+slug: 2026-05-19-foo              # required, kebab-case
+title: Foo                        # required
+status: draft                     # required; draft | active | done
+workflow: tdd                     # required; default workflow for stories
+repos: [brm]                      # required; list of repo short-names
+created: 2026-05-19               # required; ISO date
+current_story: 02-bar             # optional; hook reads this for <brm-story>
+spec_approval:                    # optional; gate on draft → active
+  required: true
+  approved_at: 2026-05-19T14:22:00Z
+  approver: keith
+```
+
+The body (after the closing `---`) is free-form markdown — typically the
+brainstorm output (the spec body).
+
+## Story frontmatter (v0.4)
+
+Stories live at `<epic>/stories/<slug>.md`. They are created by
+`brm story split` from the plan's `## Story:` markers.
+
+```yaml
+schema: brm-story/0.4             # required
+slug: 01-foo                      # required
+title: Foo story                  # required
+epic: 2026-05-19-foo              # required (parent epic slug)
+workflow: tdd                     # required (resolved: story override → epic default)
+repos: [brm]                      # required (resolved similarly)
+status: in_progress               # draft | in_progress | blocked | review | done
+phase: green                      # current phase or step name
+phase_history:                    # list of phase transitions
+  - phase: red
+    entered: 2026-05-19T15:10:00Z
+    exited: 2026-05-19T16:42:00Z
+    gate_result: pass
+acceptance:                       # list of objects with done flag
+  - { done: true, text: "first AC" }
+  - { done: false, text: "second AC" }
+last_handoff:                     # optional
+  from: tea
+  to: dev
+  at: 2026-05-19T16:42:00Z
+  body: |
+    Tests are failing as expected.
+blocked_reason: null              # optional; set by brm story block
+```
+
+The body contains the implementation notes (from the plan slice) plus an
+appended `## Handoff log` section maintained by `brm story handoff`.
+
+## Plan story markers (v0.4)
+
+`plan.md` files use `## Story: <title>` H2 headers to mark story boundaries.
+Each header must be followed (after optional blank lines) by a YAML fence
+declaring at minimum the `slug:` field. See [`stepped-workflow-schema.md`](stepped-workflow-schema.md)
+for the parallel stepped step-file pattern.

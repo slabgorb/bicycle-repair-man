@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""BRM v0.4 unified CLI dispatcher.
+
+Routes `brm <noun> <verb> [args...]` to per-noun handlers in lib/.
+Subcommands are added by their owning phase; this skeleton wires
+`version` and `help` only.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib
+import importlib.util
+import sys
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PLUGIN_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PLUGIN_ROOT))
+
+__version__ = "0.4.0"
+
+EXIT_OK = 0
+EXIT_RUNTIME = 1
+EXIT_USAGE = 2
+
+# Registered noun handlers. Each phase appends to this dict; the dispatcher
+# walks it for help and routing.
+NOUNS: dict[str, "NounHandler"] = {}
+
+
+class NounHandler:
+    """One noun's parser builder and dispatch entry."""
+
+    def __init__(self, name: str, description: str):
+        self.name = name
+        self.description = description
+        self.add_subparsers: list = []
+
+    def register(self, subparsers: argparse._SubParsersAction) -> None:
+        noun_parser = subparsers.add_parser(self.name, help=self.description)
+        verb_subs = noun_parser.add_subparsers(dest="verb", required=True)
+        for adder in self.add_subparsers:
+            adder(verb_subs)
+
+
+def register_noun(name: str, description: str) -> NounHandler:
+    handler = NOUNS.setdefault(name, NounHandler(name, description))
+    return handler
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="brm",
+        description="Bicycle Repair Man — workflow plumbing for Claude Code.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Run `brm help` for the noun list, `brm help <noun>` for verbs.",
+    )
+    sub = p.add_subparsers(dest="noun", required=True)
+
+    sub.add_parser("version", help="Print version and exit")
+    help_p = sub.add_parser("help", help="Show help for a noun, or list all nouns")
+    help_p.add_argument("subject", nargs="?", default=None)
+
+    for handler in NOUNS.values():
+        handler.register(sub)
+
+    return p
+
+
+_BUILTIN_HELP: dict[str, str] = {
+    "version": "Print version and exit. Usage: brm version",
+    "help": "Show help for a noun, or list all nouns. Usage: brm help [<noun>]",
+}
+
+
+def _do_help(subject: str | None) -> int:
+    if subject is None:
+        print("Usage: brm <noun> <verb> [args...]\n")
+        print("Nouns:")
+        for name, handler in sorted(NOUNS.items()):
+            print(f"  {name:10s}  {handler.description}")
+        print("  version     Print version and exit")
+        print("  help        Show this help (or `brm help <noun>` for verbs)")
+        return EXIT_OK
+    if subject in _BUILTIN_HELP:
+        print(_BUILTIN_HELP[subject])
+        return EXIT_OK
+    if subject not in NOUNS:
+        print(f"Unknown noun: {subject}", file=sys.stderr)
+        return EXIT_USAGE
+    # Re-invoke the parser for the noun to print its sub-help.
+    parser = _build_parser()
+    parser.parse_args([subject, "--help"])
+    return EXIT_OK  # parse_args exits, this is unreachable
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+
+    # Pre-register all known nouns (phases register lazily below).
+    _register_builtin_nouns()
+
+    if not argv:
+        # No args: print help and signal usage error.
+        _do_help(None)
+        return EXIT_USAGE
+
+    if argv[0] == "version":
+        print(__version__)
+        return EXIT_OK
+    if argv[0] == "help":
+        return _do_help(argv[1] if len(argv) > 1 else None)
+
+    # Check for unknown nouns before argparse so we can emit "Unknown" wording.
+    # Flag arguments (e.g. `-h`, `--help`) are passed through to argparse,
+    # which handles them natively (prints usage to stdout, exits 0).
+    known_nouns = set(NOUNS.keys()) | {"version", "help"}
+    if not argv[0].startswith("-") and argv[0] not in known_nouns:
+        print(f"Unknown subcommand: brm {argv[0]}", file=sys.stderr)
+        return EXIT_USAGE
+
+    parser = _build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else EXIT_USAGE
+
+    handler = NOUNS.get(args.noun)
+    if handler is None or not hasattr(handler, f"dispatch_{args.verb}"):
+        print(f"Unknown subcommand: brm {args.noun} {args.verb}", file=sys.stderr)
+        return EXIT_USAGE
+    method = getattr(handler, f"dispatch_{args.verb}")
+    return method(args)
+
+
+_NOUN_MODULES: tuple[str, ...] = (
+    # Phase B registers `epic`; Phase D registers `story`.
+    # Phase C registers `repos`; Phase E registers `roles` and `role`.
+    "epic_cli",
+    "story_cli",
+    "repos_cli",
+    "roles_cli",
+)
+
+
+def _register_builtin_nouns() -> None:
+    """Import phase modules to trigger their `register_noun(...)` calls.
+
+    Each phase adds its noun lazily on first import. We probe for the
+    module's existence via `importlib.util.find_spec` and only then import
+    it — that way a missing module is silently skipped (the phase hasn't
+    landed yet) but a *broken* module surfaces its real exception instead
+    of being swallowed by a blanket `except ImportError`.
+    """
+    for name in _NOUN_MODULES:
+        if importlib.util.find_spec(f"lib.{name}") is not None:
+            importlib.import_module(f"lib.{name}")  # let exceptions propagate
+
+
+if __name__ == "__main__":
+    sys.exit(main())
