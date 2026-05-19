@@ -107,6 +107,7 @@ def test_brm_epic_create_makes_folder_and_file(tmp_path):
     epic_dir = tmp_path / ".brm" / "epics" / "demo"
     assert epic_dir.is_dir()
     assert (epic_dir / "epic.md").is_file()
+    assert (epic_dir / "plan.md").is_file()
     assert (epic_dir / "stories").is_dir()
 
 
@@ -126,3 +127,60 @@ def test_brm_epic_create_refuses_duplicate(tmp_path):
     r = _run_brm("epic", "create", "demo", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
     assert r.returncode != 0
     assert "exists" in (r.stdout + r.stderr).lower()
+
+
+def test_brm_epic_create_rejects_traversal_slug(tmp_path):
+    r = _run_brm(
+        "epic", "create", "../../escaped",
+        "--workflow", "tdd", "--repos", "brm",
+        cwd=tmp_path,
+    )
+    assert r.returncode != 0
+    # No directories should have been created outside tmp_path/.brm/epics/.
+    brm_root = tmp_path / ".brm"
+    if brm_root.exists():
+        # Only the epics/ container may exist; nothing inside or above it.
+        for child in brm_root.rglob("*"):
+            assert child == brm_root / "epics", (
+                f"traversal created unexpected path: {child}"
+            )
+    # And nothing escaped above tmp_path.
+    assert not (tmp_path.parent / "escaped").exists()
+    assert not (tmp_path.parent.parent / "escaped").exists()
+
+
+def test_find_dispatcher_fallback_loads_brm_script():
+    """When neither __main__ nor scripts.brm is in sys.modules, the fallback
+    loader must succeed (the file has no `.py` extension, which requires an
+    explicit SourceFileLoader)."""
+    import importlib
+    import sys as _sys
+    from lib import epic_cli as _ec
+
+    saved = {}
+    for name in ("__main__", "scripts.brm"):
+        if name in _sys.modules:
+            saved[name] = _sys.modules.pop(name)
+    try:
+        mod = _ec._find_dispatcher()
+        assert hasattr(mod, "register_noun"), (
+            "fallback-loaded dispatcher must expose register_noun"
+        )
+    finally:
+        # Restore originals so other tests aren't affected.
+        for name, val in saved.items():
+            _sys.modules[name] = val
+
+
+def test_register_is_idempotent_on_reload():
+    """Reloading lib.epic_cli must not double-register the `create` verb,
+    which would make `_build_parser()` raise ValueError on the duplicate."""
+    import importlib
+    from lib import epic_cli as _ec
+
+    importlib.reload(_ec)
+    dispatcher = _ec._find_dispatcher()
+    # Building the parser exercises argparse's subparser registry; a
+    # duplicate adder would raise here.
+    parser = dispatcher._build_parser()
+    assert parser is not None

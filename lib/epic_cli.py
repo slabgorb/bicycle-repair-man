@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import date
 from pathlib import Path
 
 from lib import epic as _epic
+
+_SLUG_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]*")
 
 
 def _find_dispatcher():
@@ -21,12 +24,13 @@ def _find_dispatcher():
         mod = sys.modules.get(name)
         if mod is not None and hasattr(mod, "register_noun"):
             return mod
-    # Fallback: load the dispatcher from disk.
-    from importlib import util as _util
-    spec = _util.spec_from_file_location(
-        "scripts.brm",
-        str(Path(__file__).resolve().parent.parent / "scripts" / "brm"),
-    )
+    # Fallback: load the dispatcher from disk.  `scripts/brm` has no `.py`
+    # extension, so `spec_from_file_location` would return None without an
+    # explicit loader — pass SourceFileLoader to avoid the latent crash.
+    from importlib import machinery as _mach, util as _util
+    path = Path(__file__).resolve().parent.parent / "scripts" / "brm"
+    loader = _mach.SourceFileLoader("scripts.brm", str(path))
+    spec = _util.spec_from_file_location("scripts.brm", str(path), loader=loader)
     mod = _util.module_from_spec(spec)
     sys.modules["scripts.brm"] = mod
     spec.loader.exec_module(mod)
@@ -48,6 +52,12 @@ def _add_create(verb_subs: argparse._SubParsersAction) -> None:
 
 def dispatch_create(args: argparse.Namespace) -> int:
     slug = args.slug
+    if not _SLUG_RE.fullmatch(slug):
+        print(
+            f"slug must match [a-zA-Z0-9][a-zA-Z0-9._-]* — got {slug!r}",
+            file=sys.stderr,
+        )
+        return 2
     repos = [r.strip() for r in args.repos.split(",") if r.strip()]
     if not repos:
         print("--repos must list at least one short-name", file=sys.stderr)
@@ -87,6 +97,16 @@ def _register() -> None:
     handler = dispatcher.register_noun(
         "epic", "Manage epics (the folder/spec layer above stories)"
     )
+    # Guard against double-registration on module reload — argparse would
+    # otherwise raise `ValueError: conflicting subparser: create`.  We can't
+    # rely on object identity because a reload creates fresh function
+    # objects, so dedupe by qualified name.
+    _create_name = f"{_add_create.__module__}.{_add_create.__qualname__}"
+    handler.add_subparsers[:] = [
+        a for a in handler.add_subparsers
+        if f"{getattr(a, '__module__', '')}.{getattr(a, '__qualname__', '')}"
+        != _create_name
+    ]
     handler.add_subparsers.append(_add_create)
     handler.dispatch_create = dispatch_create
 
