@@ -179,6 +179,18 @@ def _add_activate(verb_subs: argparse._SubParsersAction) -> None:
     p.add_argument("slug")
 
 
+def _add_finish(verb_subs: argparse._SubParsersAction) -> None:
+    p = verb_subs.add_parser("finish", help="Transition epic to done")
+    p.add_argument("slug")
+    p.add_argument("--force", action="store_true",
+                   help="Allow finish even with non-terminal stories")
+
+
+def _add_archive(verb_subs: argparse._SubParsersAction) -> None:
+    p = verb_subs.add_parser("archive", help="Move epic folder to .brm/epics/.archive/")
+    p.add_argument("slug")
+
+
 def dispatch_activate(args: argparse.Namespace) -> int:
     try:
         e = _load_epic(args.slug)
@@ -216,6 +228,56 @@ def dispatch_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def dispatch_finish(args: argparse.Namespace) -> int:
+    try:
+        e = _load_epic(args.slug)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if e.status == "done":
+        print(f"epic '{args.slug}' already done")
+        return 0
+    if e.status != "active":
+        print(f"only active epics can finish (currently {e.status})", file=sys.stderr)
+        return 1
+    stories_dir = Path.cwd() / ".brm" / "epics" / args.slug / "stories"
+    active_stories: list[str] = []
+    if stories_dir.is_dir():
+        for sf in stories_dir.glob("*.md"):
+            text = sf.read_text()
+            # Quick frontmatter peek
+            if "status: in_progress" in text or "status: blocked" in text or "status: review" in text:
+                active_stories.append(sf.name)
+    if active_stories and not args.force:
+        print(
+            f"epic '{args.slug}' has non-terminal stories: {', '.join(active_stories)}.\n"
+            f"Re-run with --force to finish anyway.",
+            file=sys.stderr,
+        )
+        return 1
+    e.status = "done"
+    _epic_path(args.slug).write_text(_epic.serialize_epic(e))
+    print(f"epic '{args.slug}' finished")
+    return 0
+
+
+def dispatch_archive(args: argparse.Namespace) -> int:
+    import shutil
+    src = Path.cwd() / ".brm" / "epics" / args.slug
+    if not src.is_dir():
+        print(f"epic '{args.slug}' not found", file=sys.stderr)
+        return 1
+    dst_root = Path.cwd() / ".brm" / "epics" / ".archive"
+    dst_root.mkdir(exist_ok=True)
+    dst = dst_root / args.slug
+    if dst.exists():
+        print(f"archive target {dst} already exists", file=sys.stderr)
+        return 1
+    shutil.move(str(src), str(dst))
+    print(f"archived to {dst}")
+    return 0
+
+
 def _register() -> None:
     """Append epic-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -231,21 +293,27 @@ def _register() -> None:
     _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
     _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
     _activate_name = f"{_add_activate.__module__}.{_add_activate.__qualname__}"
+    _finish_name = f"{_add_finish.__module__}.{_add_finish.__qualname__}"
+    _archive_name = f"{_add_archive.__module__}.{_add_archive.__qualname__}"
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
         if f"{getattr(a, '__module__', '')}.{getattr(a, '__qualname__', '')}"
-        not in (_create_name, _list_name, _describe_name, _status_name, _activate_name)
+        not in (_create_name, _list_name, _describe_name, _status_name, _activate_name, _finish_name, _archive_name)
     ]
     handler.add_subparsers.append(_add_create)
     handler.add_subparsers.append(_add_list)
     handler.add_subparsers.append(_add_describe)
     handler.add_subparsers.append(_add_status)
     handler.add_subparsers.append(_add_activate)
+    handler.add_subparsers.append(_add_finish)
+    handler.add_subparsers.append(_add_archive)
     handler.dispatch_create = dispatch_create
     handler.dispatch_list = dispatch_list
     handler.dispatch_describe = dispatch_describe
     handler.dispatch_status = dispatch_status
     handler.dispatch_activate = dispatch_activate
+    handler.dispatch_finish = dispatch_finish
+    handler.dispatch_archive = dispatch_archive
 
 
 _register()

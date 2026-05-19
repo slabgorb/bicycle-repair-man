@@ -265,3 +265,37 @@ def test_brm_epic_activate_with_approval_passes_when_recorded(tmp_path):
     epic_file.write_text(text)
     r = _run_brm("epic", "activate", "alpha", cwd=tmp_path)
     assert r.returncode == 0
+
+
+def test_brm_epic_finish_from_active(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    _run_brm("epic", "activate", "alpha", cwd=tmp_path)
+    r = _run_brm("epic", "finish", "alpha", cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    from lib import epic as _epic
+    e = _epic.parse_epic_text(
+        (tmp_path / ".brm" / "epics" / "alpha" / "epic.md").read_text()
+    )
+    assert e.status == "done"
+
+
+def test_brm_epic_finish_blocks_with_active_stories_without_force(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    _run_brm("epic", "activate", "alpha", cwd=tmp_path)
+    # Place a fake in-progress story
+    stories_dir = tmp_path / ".brm" / "epics" / "alpha" / "stories"
+    (stories_dir / "01-foo.md").write_text(
+        "---\nschema: brm-story/0.4\nslug: 01-foo\nstatus: in_progress\nphase: red\n"
+        "epic: alpha\nworkflow: tdd\nrepos: [brm]\ntitle: foo\n---\n"
+    )
+    r = _run_brm("epic", "finish", "alpha", cwd=tmp_path)
+    assert r.returncode != 0
+    assert "in_progress" in (r.stdout + r.stderr).lower() or "force" in (r.stdout + r.stderr).lower()
+
+
+def test_brm_epic_archive_moves_to_archive_folder(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    r = _run_brm("epic", "archive", "alpha", cwd=tmp_path)
+    assert r.returncode == 0
+    assert not (tmp_path / ".brm" / "epics" / "alpha").exists()
+    assert (tmp_path / ".brm" / "epics" / ".archive" / "alpha").exists()
