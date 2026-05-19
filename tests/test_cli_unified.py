@@ -32,7 +32,7 @@ def test_brm_version_prints_semver():
     assert r.stdout.strip().count(".") == 2  # e.g. "0.4.0"
 
 
-@pytest.mark.xfail(reason="Nouns register in later phases; remove after Phase G")
+@pytest.mark.xfail(strict=True, reason="Nouns register in later phases; remove after Phase G")
 def test_brm_help_lists_known_nouns():
     r = _run("help")
     assert r.returncode == 0
@@ -45,3 +45,25 @@ def test_brm_unknown_subcommand_errors():
     r = _run("nonsense")
     assert r.returncode != 0
     assert "unknown" in (r.stdout + r.stderr).lower()
+
+
+def test_brm_dash_dash_help_works():
+    r = _run("--help")
+    assert r.returncode == 0, f"--help should exit 0, got {r.returncode}: {r.stderr!r}"
+    assert "usage:" in r.stdout.lower(), f"--help should print usage to stdout: {r.stdout!r}"
+
+
+def test_brm_dash_h_works():
+    r = _run("-h")
+    assert r.returncode == 0, f"-h should exit 0, got {r.returncode}: {r.stderr!r}"
+    assert "usage:" in r.stdout.lower(), f"-h should print usage to stdout: {r.stdout!r}"
+
+
+def test_brm_help_version_exits_zero():
+    r = _run("help", "version")
+    assert r.returncode == 0, f"`brm help version` should exit 0, got {r.returncode}: {r.stderr!r}"
+
+
+def test_brm_help_help_exits_zero():
+    r = _run("help", "help")
+    assert r.returncode == 0, f"`brm help help` should exit 0, got {r.returncode}: {r.stderr!r}"

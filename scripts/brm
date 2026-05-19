@@ -8,6 +8,8 @@ Subcommands are added by their owning phase; this skeleton wires
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -65,6 +67,12 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+_BUILTIN_HELP: dict[str, str] = {
+    "version": "Print version and exit. Usage: brm version",
+    "help": "Show help for a noun, or list all nouns. Usage: brm help [<noun>]",
+}
+
+
 def _do_help(subject: str | None) -> int:
     if subject is None:
         print("Usage: brm <noun> <verb> [args...]\n")
@@ -73,6 +81,9 @@ def _do_help(subject: str | None) -> int:
             print(f"  {name:10s}  {handler.description}")
         print("  version     Print version and exit")
         print("  help        Show this help (or `brm help <noun>` for verbs)")
+        return EXIT_OK
+    if subject in _BUILTIN_HELP:
+        print(_BUILTIN_HELP[subject])
         return EXIT_OK
     if subject not in NOUNS:
         print(f"Unknown noun: {subject}", file=sys.stderr)
@@ -101,8 +112,10 @@ def main(argv: list[str] | None = None) -> int:
         return _do_help(argv[1] if len(argv) > 1 else None)
 
     # Check for unknown nouns before argparse so we can emit "Unknown" wording.
+    # Flag arguments (e.g. `-h`, `--help`) are passed through to argparse,
+    # which handles them natively (prints usage to stdout, exits 0).
     known_nouns = set(NOUNS.keys()) | {"version", "help"}
-    if argv[0] not in known_nouns:
+    if not argv[0].startswith("-") and argv[0] not in known_nouns:
         print(f"Unknown subcommand: brm {argv[0]}", file=sys.stderr)
         return EXIT_USAGE
 
@@ -120,32 +133,28 @@ def main(argv: list[str] | None = None) -> int:
     return method(args)
 
 
+_NOUN_MODULES: tuple[str, ...] = (
+    # Phase B registers `epic`; Phase D registers `story`.
+    # Phase C registers `repos`; Phase E registers `roles` and `role`.
+    "epic_cli",
+    "story_cli",
+    "repos_cli",
+    "roles_cli",
+)
+
+
 def _register_builtin_nouns() -> None:
     """Import phase modules to trigger their `register_noun(...)` calls.
 
-    Each phase adds its noun lazily on first import. We import the wrappers
-    here so the help system sees every noun without forcing eager module
-    work for unused commands.
+    Each phase adds its noun lazily on first import. We probe for the
+    module's existence via `importlib.util.find_spec` and only then import
+    it — that way a missing module is silently skipped (the phase hasn't
+    landed yet) but a *broken* module surfaces its real exception instead
+    of being swallowed by a blanket `except ImportError`.
     """
-    # Phases B–E (epic, story) register in Phase B.
-    # Phase B registers `epic`; Phase D registers `story`.
-    # Plan 1 phases below import these.
-    try:
-        from lib import epic_cli  # noqa: F401 — side effect: registers `epic`
-    except ImportError:
-        pass
-    try:
-        from lib import story_cli  # noqa: F401 — registers `story`
-    except ImportError:
-        pass
-    try:
-        from lib import repos_cli  # noqa: F401 — registers `repos`
-    except ImportError:
-        pass
-    try:
-        from lib import roles_cli  # noqa: F401 — registers `roles` and `role`
-    except ImportError:
-        pass
+    for name in _NOUN_MODULES:
+        if importlib.util.find_spec(f"lib.{name}") is not None:
+            importlib.import_module(f"lib.{name}")  # let exceptions propagate
 
 
 if __name__ == "__main__":
