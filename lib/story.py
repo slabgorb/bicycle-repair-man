@@ -82,6 +82,42 @@ def parse_story_text(text: str) -> Story:
     )
 
 
+def render_story_block(s: "Story", *, path: "Path") -> str:
+    """Render the <brm-story> XML block."""
+    from pathlib import Path as _Path
+
+    def esc(x: str) -> str:
+        return (x.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                 .replace('"', "&quot;"))
+    lines = ["<brm-story>"]
+    lines.append(f"  <slug>{esc(s.slug)}</slug>")
+    lines.append(f"  <title>{esc(s.title)}</title>")
+    lines.append(f"  <workflow>{esc(s.workflow)}</workflow>")
+    lines.append(f"  <phase>{esc(s.phase or '-')}</phase>")
+    lines.append(f"  <status>{s.status}</status>")
+    lines.append(f"  <repos>{','.join(esc(r) for r in s.repos)}</repos>")
+    if s.acceptance:
+        lines.append("  <acceptance>")
+        for ac in s.acceptance:
+            done = "true" if ac.get("done") else "false"
+            lines.append(f'    <criterion done="{done}">{esc(ac["text"])}</criterion>')
+        lines.append("  </acceptance>")
+    if s.last_handoff:
+        h = s.last_handoff
+        body = esc(h.get("body", "").strip())
+        lines.append(
+            f'  <last-handoff from="{esc(h.get("from",""))}" '
+            f'to="{esc(h.get("to",""))}" at="{esc(h.get("at",""))}">'
+        )
+        lines.append(f"    {body}")
+        lines.append("  </last-handoff>")
+    if s.blocked_reason:
+        lines.append(f"  <blocked-reason>{esc(s.blocked_reason)}</blocked-reason>")
+    lines.append(f"  <path>{esc(str(path))}</path>")
+    lines.append("</brm-story>")
+    return "\n".join(lines)
+
+
 def serialize_story(s: Story) -> str:
     fm: dict[str, Any] = {
         "schema": s.schema,

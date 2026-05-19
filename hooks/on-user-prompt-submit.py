@@ -185,7 +185,11 @@ def _render_orchestrator_block(orch_root: Path, cwd: Path) -> str | None:
 
 
 def _render_story_block(story_file: Path) -> str:
-    return ""  # Task F2
+    try:
+        s = _story_mod.parse_story_text(story_file.read_text())
+    except _story_mod.StorySchemaError:
+        return ""
+    return _story_mod.render_story_block(s, path=story_file)
 
 
 def main() -> int:
