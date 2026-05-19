@@ -203,3 +203,31 @@ def test_story_advance_to_explicit_phase(tmp_path):
     assert s2.phase == "review"
 
 
+# ---------------------------------------------------------------------------
+# E5: brm story block / unblock
+# ---------------------------------------------------------------------------
+
+def test_story_block_with_reason(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    r = _run("story", "block", "demo", "--story", "01-first",
+             "--reason", "waiting on upstream API", cwd=tmp_path)
+    assert r.returncode == 0
+    from lib import story as _story
+    s = _story.parse_story_text(
+        (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md").read_text()
+    )
+    assert s.status == "blocked"
+    assert s.blocked_reason == "waiting on upstream API"
+
+
+def test_story_unblock_restores_status(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    _run("story", "block", "demo", "--story", "01-first", "--reason", "x", cwd=tmp_path)
+    r = _run("story", "unblock", "demo", "--story", "01-first", cwd=tmp_path)
+    assert r.returncode == 0
+    from lib import story as _story
+    s = _story.parse_story_text(
+        (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md").read_text()
+    )
+    assert s.status in ("in_progress", "draft")
+    assert s.blocked_reason is None

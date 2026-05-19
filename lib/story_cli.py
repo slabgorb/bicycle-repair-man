@@ -406,6 +406,34 @@ def dispatch_advance(args: argparse.Namespace) -> int:
     return 0
 
 
+def dispatch_block(args: argparse.Namespace) -> int:
+    try:
+        slug = _resolve_story_slug(args.epic_slug, args.story_slug)
+        s = _load_story(args.epic_slug, slug)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr); return 1
+    s.status = "blocked"
+    s.blocked_reason = args.reason
+    _save_story(args.epic_slug, s)
+    print(f"story '{slug}' blocked: {args.reason}")
+    return 0
+
+
+def dispatch_unblock(args: argparse.Namespace) -> int:
+    try:
+        slug = _resolve_story_slug(args.epic_slug, args.story_slug)
+        s = _load_story(args.epic_slug, slug)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr); return 1
+    if s.status != "blocked":
+        print(f"story '{slug}' is not blocked", file=sys.stderr); return 1
+    s.status = "in_progress" if s.phase else "draft"
+    s.blocked_reason = None
+    _save_story(args.epic_slug, s)
+    print(f"story '{slug}' unblocked (status={s.status})")
+    return 0
+
+
 def _register() -> None:
     """Append story-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -468,6 +496,17 @@ def _register() -> None:
         p.add_argument("--force", action="store_true",
                        help="Skip gate-pass requirement")
 
+    def _add_block(verb_subs):
+        p = verb_subs.add_parser("block", help="Mark story as blocked")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+        p.add_argument("--reason", required=True)
+
+    def _add_unblock(verb_subs):
+        p = verb_subs.add_parser("unblock", help="Resume blocked story")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+
     _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
     _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
     _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
@@ -476,10 +515,12 @@ def _register() -> None:
     _gate_name = f"{_add_gate.__module__}.{_add_gate.__qualname__}"
     _record_gate_name = f"{_add_record_gate.__module__}.{_add_record_gate.__qualname__}"
     _advance_name = f"{_add_advance.__module__}.{_add_advance.__qualname__}"
+    _block_name = f"{_add_block.__module__}.{_add_block.__qualname__}"
+    _unblock_name = f"{_add_unblock.__module__}.{_add_unblock.__qualname__}"
     _dedup_names = (
         _split_name, _list_name, _describe_name, _status_name, _switch_name,
         _handoff_name, _gate_name, _record_gate_name,
-        _advance_name,
+        _advance_name, _block_name, _unblock_name,
     )
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
@@ -504,6 +545,10 @@ def _register() -> None:
     setattr(handler, "dispatch_record-gate", dispatch_record_gate)
     handler.add_subparsers.append(_add_advance)
     handler.dispatch_advance = dispatch_advance
+    handler.add_subparsers.append(_add_block)
+    handler.dispatch_block = dispatch_block
+    handler.add_subparsers.append(_add_unblock)
+    handler.dispatch_unblock = dispatch_unblock
 
 
 _register()
