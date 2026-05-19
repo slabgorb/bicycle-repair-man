@@ -56,6 +56,16 @@ def _add_list(verb_subs: argparse._SubParsersAction) -> None:
     p.add_argument("--json", action="store_true")
 
 
+def _add_describe(verb_subs: argparse._SubParsersAction) -> None:
+    p = verb_subs.add_parser("describe", help="Show epic details")
+    p.add_argument("slug")
+
+
+def _add_status(verb_subs: argparse._SubParsersAction) -> None:
+    p = verb_subs.add_parser("status", help="Show epic + story rollup")
+    p.add_argument("slug")
+
+
 def dispatch_create(args: argparse.Namespace) -> int:
     slug = args.slug
     if not _SLUG_RE.fullmatch(slug):
@@ -132,6 +142,52 @@ def dispatch_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _epic_path(slug: str) -> Path:
+    return Path.cwd() / ".brm" / "epics" / slug / "epic.md"
+
+
+def _load_epic(slug: str) -> _epic.Epic:
+    path = _epic_path(slug)
+    if not path.is_file():
+        raise FileNotFoundError(f"epic '{slug}' not found at {path}")
+    return _epic.parse_epic_text(path.read_text())
+
+
+def dispatch_describe(args: argparse.Namespace) -> int:
+    try:
+        e = _load_epic(args.slug)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"slug:     {e.slug}")
+    print(f"title:    {e.title}")
+    print(f"status:   {e.status}")
+    print(f"workflow: {e.workflow}")
+    print(f"repos:    {', '.join(e.repos)}")
+    print(f"created:  {e.created}")
+    if e.current_story:
+        print(f"current:  {e.current_story}")
+    if e.spec_approval:
+        sa = e.spec_approval
+        approved = sa.approved_at or "(pending)"
+        print(f"approval: required={sa.required} approved_at={approved}")
+    return 0
+
+
+def dispatch_status(args: argparse.Namespace) -> int:
+    try:
+        e = _load_epic(args.slug)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    stories_dir = Path.cwd() / ".brm" / "epics" / args.slug / "stories"
+    story_files = sorted(stories_dir.glob("*.md")) if stories_dir.is_dir() else []
+    print(f"epic {e.slug} ({e.status})")
+    print(f"stories: {len(story_files)}")
+    # Per-status rollup populated in Phase D once stories have status.
+    return 0
+
+
 def _register() -> None:
     """Append epic-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -144,15 +200,21 @@ def _register() -> None:
     # objects, so dedupe by qualified name.
     _create_name = f"{_add_create.__module__}.{_add_create.__qualname__}"
     _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
+    _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
+    _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
         if f"{getattr(a, '__module__', '')}.{getattr(a, '__qualname__', '')}"
-        not in (_create_name, _list_name)
+        not in (_create_name, _list_name, _describe_name, _status_name)
     ]
     handler.add_subparsers.append(_add_create)
     handler.add_subparsers.append(_add_list)
+    handler.add_subparsers.append(_add_describe)
+    handler.add_subparsers.append(_add_status)
     handler.dispatch_create = dispatch_create
     handler.dispatch_list = dispatch_list
+    handler.dispatch_describe = dispatch_describe
+    handler.dispatch_status = dispatch_status
 
 
 _register()

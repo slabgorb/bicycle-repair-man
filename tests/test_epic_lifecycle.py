@@ -206,3 +206,28 @@ def test_brm_epic_list_filters_by_status(tmp_path):
     _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
     r = _run_brm("epic", "list", "--status", "active", cwd=tmp_path)
     assert "alpha" not in r.stdout  # alpha is draft, not active
+
+
+def test_brm_epic_describe_prints_frontmatter(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    r = _run_brm("epic", "describe", "alpha", cwd=tmp_path)
+    assert r.returncode == 0
+    out = r.stdout
+    for token in ("alpha", "draft", "tdd", "brm"):
+        assert token in out
+
+
+def test_brm_epic_describe_unknown_slug_errors(tmp_path):
+    (tmp_path / ".brm" / "epics").mkdir(parents=True)
+    r = _run_brm("epic", "describe", "nope", cwd=tmp_path)
+    assert r.returncode != 0
+    assert "not found" in (r.stdout + r.stderr).lower()
+
+
+def test_brm_epic_status_includes_story_rollup(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    r = _run_brm("epic", "status", "alpha", cwd=tmp_path)
+    assert r.returncode == 0
+    # No stories yet, so the rollup shows zero stories
+    assert "stories" in r.stdout.lower()
+    assert "0" in r.stdout
