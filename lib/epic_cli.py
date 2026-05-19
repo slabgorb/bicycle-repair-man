@@ -1,0 +1,94 @@
+"""Unified-CLI integration for the `epic` noun."""
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import date
+from pathlib import Path
+
+from lib import epic as _epic
+
+
+def _find_dispatcher():
+    """Locate the brm dispatcher module regardless of how it was loaded.
+
+    When invoked via `python scripts/brm`, the dispatcher runs as `__main__`.
+    When imported as a library (e.g. in tests), it may be under `scripts.brm`.
+    Fall back to loading the file from disk so `lib.epic_cli` can also be
+    imported standalone.
+    """
+    for name in ("__main__", "scripts.brm"):
+        mod = sys.modules.get(name)
+        if mod is not None and hasattr(mod, "register_noun"):
+            return mod
+    # Fallback: load the dispatcher from disk.
+    from importlib import util as _util
+    spec = _util.spec_from_file_location(
+        "scripts.brm",
+        str(Path(__file__).resolve().parent.parent / "scripts" / "brm"),
+    )
+    mod = _util.module_from_spec(spec)
+    sys.modules["scripts.brm"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _add_create(verb_subs: argparse._SubParsersAction) -> None:
+    p = verb_subs.add_parser("create", help="Create a new epic")
+    p.add_argument("slug")
+    p.add_argument("--workflow", required=True)
+    p.add_argument("--repos", required=True, help="comma-separated short-names")
+    p.add_argument("--title", default=None)
+    p.add_argument(
+        "--require-approval",
+        action="store_true",
+        help="Require spec-approval gate before activate",
+    )
+
+
+def dispatch_create(args: argparse.Namespace) -> int:
+    slug = args.slug
+    repos = [r.strip() for r in args.repos.split(",") if r.strip()]
+    if not repos:
+        print("--repos must list at least one short-name", file=sys.stderr)
+        return 2
+
+    # Anchor at cwd.  Phase F will add walk-up resolution to find .brm/.
+    brm_root = Path.cwd() / ".brm"
+    epic_dir = brm_root / "epics" / slug
+    if epic_dir.exists():
+        print(f"epic '{slug}' already exists at {epic_dir}", file=sys.stderr)
+        return 1
+
+    epic_dir.mkdir(parents=True, exist_ok=False)
+    (epic_dir / "stories").mkdir()
+
+    approval = _epic.SpecApproval(required=True) if args.require_approval else None
+    e = _epic.Epic(
+        slug=slug,
+        title=args.title or slug,
+        status="draft",
+        workflow=args.workflow,
+        repos=repos,
+        created=date.today().isoformat(),
+        spec_approval=approval,
+        body=f"# {args.title or slug}\n\n_(spec body — fill in via brainstorming)_\n",
+    )
+    (epic_dir / "epic.md").write_text(_epic.serialize_epic(e))
+    # plan.md is created empty so writing-plans output has a destination.
+    (epic_dir / "plan.md").write_text(f"# Implementation plan — {args.title or slug}\n\n")
+    print(f"created epic at {epic_dir}")
+    return 0
+
+
+def _register() -> None:
+    """Append epic-noun parser builders to the unified CLI's NOUNS dict."""
+    dispatcher = _find_dispatcher()
+    handler = dispatcher.register_noun(
+        "epic", "Manage epics (the folder/spec layer above stories)"
+    )
+    handler.add_subparsers.append(_add_create)
+    handler.dispatch_create = dispatch_create
+
+
+_register()
