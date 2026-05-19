@@ -20,7 +20,9 @@ BRM keeps the *engine*, not the *fleet management*.
 
 ## Current state
 
-v0.1.0 implementation in progress per `docs/superpowers/plans/2026-05-12-brm-v0.1.0-implementation.md`. The design spec at `docs/superpowers/specs/2026-05-12-brm-design.md` is the contract. Tests run via `python3 -m pytest -v` from the repo root; no other build pipeline.
+v0.4 foundation implementation in progress per `docs/superpowers/plans/2026-05-19-brm-v0.4-foundation.md`. The design spec at `docs/superpowers/specs/2026-05-19-brm-v0.4-design.md` is the contract. Plan 1 covers items A (epic/story hierarchy + unified `brm` CLI) and B (two-file agents + helpers + stepped workflows); Plan 2 (in `docs/superpowers/plans/`) will cover items C (prime context), D (deeper Superpowers seam), and E (Zeitgoose roster manifest). Tests run via `python3 -m pytest -v` from the repo root; no other build pipeline.
+
+Earlier specs and plans are still authoritative for what shipped in their respective releases (v0.1.0 design at `2026-05-12-brm-design.md`, v0.2 orchestrator at `2026-05-12-brm-v0.2-orchestrator-design.md`).
 
 ## Source repos to reference
 
