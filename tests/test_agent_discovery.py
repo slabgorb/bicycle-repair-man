@@ -120,3 +120,20 @@ def test_command_wrappers_are_thin_and_marked():
         # Wrapper should be small (no full role description)
         body = text.split("---", 2)[-1] if text.startswith("---") else text
         assert len(body.splitlines()) < 50, "wrapper should be thin"
+
+
+def test_all_twelve_helpers_present_and_kind_helper():
+    from pathlib import Path
+    agents_dir = Path(__file__).resolve().parent.parent / "agents"
+    helpers = [
+        "reviewer-security", "reviewer-edge-hunter", "reviewer-silent-failure-hunter",
+        "reviewer-test-analyzer", "reviewer-type-design", "reviewer-rule-checker",
+        "reviewer-simplifier", "reviewer-comment-analyzer",
+        "simplify-reuse", "simplify-quality", "simplify-efficiency",
+        "testing-runner",
+    ]
+    for name in helpers:
+        f = agents_dir / f"{name}.md"
+        assert f.is_file(), f"missing helper: {name}"
+        a = _agent.parse_agent_text(f.read_text(), name=name)
+        assert a.kind == "helper"
