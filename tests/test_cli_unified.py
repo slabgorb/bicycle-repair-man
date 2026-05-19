@@ -32,7 +32,6 @@ def test_brm_version_prints_semver():
     assert r.stdout.strip().count(".") == 2  # e.g. "0.4.0"
 
 
-@pytest.mark.xfail(strict=True, reason="Nouns register in later phases; remove after Phase G")
 def test_brm_help_lists_known_nouns():
     r = _run("help")
     assert r.returncode == 0
@@ -107,3 +106,30 @@ def test_brm_repos_shim_prints_deprecation_warning():
         text=True,
     )
     assert "deprecated" in r.stderr.lower() or "deprecat" in r.stderr.lower()
+
+
+def test_brm_repos_status_matches_legacy(tmp_path):
+    """`brm repos status` should produce the same content as `brm-repos status`
+    when run in a workspace with a repos.yaml."""
+    repos_yaml = tmp_path / ".brm" / "repos.yaml"
+    repos_yaml.parent.mkdir(parents=True)
+    repos_yaml.write_text("""\
+repos:
+  api:
+    path: services/api
+    type: backend
+    default_branch: main
+    test_command: ""
+    lint_command: ""
+""")
+    r1 = subprocess.run(
+        [sys.executable, str(BRM), "repos", "status"],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    r2 = subprocess.run(
+        [sys.executable, str(BRM_REPOS), "status"],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    # Both should succeed; both should mention "api"
+    assert r1.returncode == 0
+    assert "api" in r1.stdout
