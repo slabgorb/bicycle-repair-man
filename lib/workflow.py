@@ -7,7 +7,6 @@ from typing import Any
 
 import yaml
 
-_VALID_AGENTS = ("tea", "dev", "reviewer", "architect", "pm", "tech-writer")
 _VALID_EXPANSIONS = ("per-repo",)  # as-written and manual reserved for v0.4+
 _RESERVED_EXPANSIONS = ("as-written", "manual")
 
@@ -47,8 +46,16 @@ def load_workflow(
     for candidate in _candidates(name, plugin_root, orchestrator_root):
         if candidate.is_file():
             text = candidate.read_text(encoding="utf-8")
-            return _parse_workflow(text)
+            return _parse_workflow(text, plugin_root=plugin_root)
     raise WorkflowSchemaError(f"workflow '{name}' not found in any search path")
+
+
+def load_workflow_file(
+    path: Path, *, plugin_root: Path, project_root: Path | None = None,
+) -> Workflow:
+    """Load and validate a workflow from a specific file path."""
+    text = path.read_text(encoding="utf-8")
+    return _parse_workflow(text, plugin_root=plugin_root, project_root=project_root)
 
 
 def _candidates(name: str, plugin_root: Path, orchestrator_root: Path | None):
@@ -57,7 +64,39 @@ def _candidates(name: str, plugin_root: Path, orchestrator_root: Path | None):
     yield plugin_root / "workflows" / f"{name}.yaml"
 
 
-def _parse_workflow(text: str) -> Workflow:
+def _known_agents(
+    plugin_root: Path | None = None, project_root: Path | None = None
+) -> set[str]:
+    """Return the set of agent names discoverable at validation time."""
+    from lib import agent as _agent_mod
+    pr = plugin_root or Path(__file__).resolve().parent.parent
+    discovered = _agent_mod.discover_agents(
+        plugin_root=pr,
+        project_root=project_root,
+    )
+    # Only strategic + tactical can be referenced as workflow agents; helpers are
+    # dispatched via Task, not phase-bound.
+    return {name for name, a in discovered.items() if a.kind in ("strategic", "tactical")}
+
+
+def _validate_agent(
+    agent_name: str, *,
+    plugin_root: Path | None = None,
+    project_root: Path | None = None,
+) -> None:
+    valid = _known_agents(plugin_root=plugin_root, project_root=project_root)
+    if agent_name not in valid:
+        raise WorkflowSchemaError(
+            f"unknown agent '{agent_name}'. Known: {sorted(valid)}. "
+            f"Run `brm roles list --include-custom` to see all agents."
+        )
+
+
+def _parse_workflow(
+    text: str,
+    plugin_root: Path | None = None,
+    project_root: Path | None = None,
+) -> Workflow:
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError as e:
@@ -77,7 +116,8 @@ def _parse_workflow(text: str) -> Workflow:
     phases_raw = wf.get("phases") or []
     if not phases_raw:
         raise WorkflowSchemaError("workflow must have at least one phase")
-    phases = [_parse_phase(p) for p in phases_raw]
+    phases = [_parse_phase(p, plugin_root=plugin_root, project_root=project_root)
+              for p in phases_raw]
 
     seen: set[str] = set()
     for p in phases:
@@ -96,13 +136,14 @@ def _parse_workflow(text: str) -> Workflow:
     return out
 
 
-def _parse_phase(raw: dict[str, Any]) -> WorkflowPhase:
+def _parse_phase(
+    raw: dict[str, Any],
+    plugin_root: Path | None = None,
+    project_root: Path | None = None,
+) -> WorkflowPhase:
     if not isinstance(raw, dict) or "name" not in raw or "agent" not in raw:
         raise WorkflowSchemaError(f"phase missing name/agent: {raw!r}")
-    if raw["agent"] not in _VALID_AGENTS:
-        raise WorkflowSchemaError(
-            f"phase '{raw['name']}': agent '{raw['agent']}' not in {_VALID_AGENTS}"
-        )
+    _validate_agent(raw["agent"], plugin_root=plugin_root, project_root=project_root)
     has_repo = "repo" in raw and raw["repo"] is not None
     has_repos = "repos" in raw and raw["repos"] is not None
     if has_repo and has_repos:
