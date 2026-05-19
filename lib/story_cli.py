@@ -365,26 +365,40 @@ def dispatch_advance(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr); return 1
     plugin_root = Path(__file__).resolve().parent.parent
-    wf = _workflow_mod.load_workflow(s.workflow, plugin_root=plugin_root)
-    phase_names = [ph.name for ph in wf.phases]
+    # Try project-level workflow override first, then plugin.
+    wf_path = None
+    for cand in (
+        Path.cwd() / ".brm" / "workflows" / f"{s.workflow}.yaml",
+        plugin_root / "workflows" / f"{s.workflow}.yaml",
+    ):
+        if cand.is_file():
+            wf_path = cand; break
+    if wf_path is None:
+        print(f"workflow '{s.workflow}' not found", file=sys.stderr); return 1
+    wf = _workflow_mod.load_workflow_file(wf_path, plugin_root=plugin_root)
+
+    if wf.type == "stepped":
+        step_names = [st.name for st in (wf.steps or [])]
+    else:
+        step_names = [ph.name for ph in wf.phases]
+    if not step_names:
+        print(f"workflow '{s.workflow}' has no phases or steps", file=sys.stderr); return 1
+
     if s.phase is None:
-        # Entering the workflow at the first phase
-        target = args.to_phase or phase_names[0]
+        target = args.to_phase or step_names[0]
     else:
         if args.to_phase:
             target = args.to_phase
         else:
             try:
-                idx = phase_names.index(s.phase)
+                idx = step_names.index(s.phase)
             except ValueError:
-                print(f"current phase '{s.phase}' not in workflow '{s.workflow}'", file=sys.stderr)
-                return 1
-            if idx + 1 >= len(phase_names):
-                print(f"story already at terminal phase '{s.phase}'", file=sys.stderr)
-                return 1
-            target = phase_names[idx + 1]
-        # Gate-pass check unless --force
-        if not args.force:
+                print(f"current phase '{s.phase}' not in workflow '{s.workflow}'", file=sys.stderr); return 1
+            if idx + 1 >= len(step_names):
+                print(f"story already at terminal phase '{s.phase}'", file=sys.stderr); return 1
+            target = step_names[idx + 1]
+        # Stepped workflows are user-driven; no gate-pass enforcement on advance.
+        if wf.type == "phased" and not args.force:
             cur_history = [h for h in s.phase_history if h.get("phase") == s.phase]
             if not cur_history or cur_history[-1].get("gate_result") != "pass":
                 print(
@@ -393,16 +407,16 @@ def dispatch_advance(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
-    if target not in phase_names:
-        print(f"target phase '{target}' not in workflow '{s.workflow}'", file=sys.stderr)
-        return 1
+    if target not in step_names:
+        print(f"target '{target}' not in workflow '{s.workflow}'", file=sys.stderr); return 1
+    from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     s.phase = target
     if s.status == "draft":
         s.status = "in_progress"
     s.phase_history.append({"phase": target, "entered": now, "exited": None, "gate_result": None})
     _save_story(args.epic_slug, s)
-    print(f"advanced to phase '{target}'")
+    print(f"advanced to '{target}'")
     return 0
 
 

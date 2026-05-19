@@ -98,6 +98,60 @@ workflow:
     assert wf.steps[0].name == "initialize"
 
 
+def test_stepped_advance_uses_step_names(tmp_path):
+    """A story whose workflow is stepped should advance via step names."""
+    from lib import workflow as _wf
+    # Build a stepped workflow in tmp_path
+    (tmp_path / "myflow").mkdir()
+    (tmp_path / "myflow" / "steps").mkdir()
+    (tmp_path / "myflow" / "steps" / "step-01-init.md").write_text(STEP_TEXT.replace(
+        "next: step-02-context", "next: step-02-done"
+    ))
+    (tmp_path / "myflow" / "steps" / "step-02-done.md").write_text(
+        STEP_TEXT.replace("number: 1", "number: 2")
+                 .replace("name: initialize", "name: done")
+                 .replace("next: step-02-context", "next: null")
+    )
+    (tmp_path / ".brm" / "workflows").mkdir(parents=True)
+    (tmp_path / ".brm" / "workflows" / "myflow.yaml").write_text("""
+workflow:
+  name: myflow
+  type: stepped
+  agent: architect
+  steps:
+    path: ../../myflow/steps/
+""")
+    # Create an epic + story using this workflow
+    import subprocess, sys
+    from pathlib import Path as _P
+    BRM = _P(__file__).resolve().parent.parent / "scripts" / "brm"
+    subprocess.run([sys.executable, str(BRM), "epic", "create", "demo",
+                    "--workflow", "myflow", "--repos", "brm"], cwd=tmp_path, check=True)
+    plan = """# Plan
+
+## Story: First
+
+```yaml
+slug: 01-first
+acceptance: []
+```
+
+Body.
+"""
+    (tmp_path / ".brm" / "epics" / "demo" / "plan.md").write_text(plan)
+    subprocess.run([sys.executable, str(BRM), "story", "split", "demo"], cwd=tmp_path, check=True)
+    # Advance once (story enters first step)
+    r = subprocess.run([sys.executable, str(BRM), "story", "advance", "demo",
+                        "--story", "01-first"],
+                       cwd=tmp_path, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    from lib import story as _story_mod
+    s = _story_mod.parse_story_text(
+        (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md").read_text()
+    )
+    assert s.phase == "initialize"
+
+
 def test_stepped_workflow_rejects_expansion_field(tmp_path):
     from lib import workflow as _wf
     (tmp_path / "myflow.yaml").write_text("""

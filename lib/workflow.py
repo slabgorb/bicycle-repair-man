@@ -50,7 +50,7 @@ def load_workflow(
     for candidate in _candidates(name, plugin_root, orchestrator_root):
         if candidate.is_file():
             text = candidate.read_text(encoding="utf-8")
-            return _parse_workflow(text, plugin_root=plugin_root)
+            return _parse_workflow(text, plugin_root=plugin_root, yaml_path=candidate)
     raise WorkflowSchemaError(f"workflow '{name}' not found in any search path")
 
 
