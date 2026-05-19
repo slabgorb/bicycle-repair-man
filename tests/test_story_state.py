@@ -139,3 +139,67 @@ def test_story_record_gate_pass(tmp_path):
     s2 = _story.parse_story_text(sp.read_text())
     # phase_history gets an entry with the gate result
     assert any(h.get("gate_result") == "pass" for h in s2.phase_history) or s2.phase_history == []
+
+
+# ---------------------------------------------------------------------------
+# E4: brm story advance
+# ---------------------------------------------------------------------------
+
+def test_story_advance_moves_to_next_phase(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    from lib import story as _story
+    sp = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md"
+    s = _story.parse_story_text(sp.read_text())
+    s.status = "in_progress"; s.phase = "red"
+    s.phase_history = [{
+        "phase": "red", "entered": "2026-05-19T10:00:00Z",
+        "exited": "2026-05-19T11:00:00Z", "gate_result": "pass",
+    }]
+    sp.write_text(_story.serialize_story(s))
+    r = _run("story", "advance", "demo", "--story", "01-first", cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    s2 = _story.parse_story_text(sp.read_text())
+    assert s2.phase == "green"  # next phase in tdd.yaml after red
+
+
+def test_story_advance_refuses_without_gate_pass(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    from lib import story as _story
+    sp = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md"
+    s = _story.parse_story_text(sp.read_text())
+    s.status = "in_progress"; s.phase = "red"
+    # No gate result yet
+    sp.write_text(_story.serialize_story(s))
+    r = _run("story", "advance", "demo", "--story", "01-first", cwd=tmp_path)
+    assert r.returncode != 0
+    assert "gate" in (r.stdout + r.stderr).lower()
+
+
+def test_story_advance_force_skips_gate(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    from lib import story as _story
+    sp = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md"
+    s = _story.parse_story_text(sp.read_text())
+    s.status = "in_progress"; s.phase = "red"
+    sp.write_text(_story.serialize_story(s))
+    r = _run("story", "advance", "demo", "--story", "01-first", "--force", cwd=tmp_path)
+    assert r.returncode == 0
+
+
+def test_story_advance_to_explicit_phase(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    from lib import story as _story
+    sp = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md"
+    s = _story.parse_story_text(sp.read_text())
+    s.status = "in_progress"; s.phase = "red"
+    s.phase_history = [{
+        "phase": "red", "entered": "2026-05-19T10:00:00Z",
+        "exited": "2026-05-19T11:00:00Z", "gate_result": "pass",
+    }]
+    sp.write_text(_story.serialize_story(s))
+    r = _run("story", "advance", "demo", "--story", "01-first", "--to", "review", cwd=tmp_path)
+    assert r.returncode == 0
+    s2 = _story.parse_story_text(sp.read_text())
+    assert s2.phase == "review"
+
+

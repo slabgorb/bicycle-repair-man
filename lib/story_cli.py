@@ -358,6 +358,54 @@ def dispatch_record_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+def dispatch_advance(args: argparse.Namespace) -> int:
+    try:
+        slug = _resolve_story_slug(args.epic_slug, args.story_slug)
+        s = _load_story(args.epic_slug, slug)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr); return 1
+    plugin_root = Path(__file__).resolve().parent.parent
+    wf = _workflow_mod.load_workflow(s.workflow, plugin_root=plugin_root)
+    phase_names = [ph.name for ph in wf.phases]
+    if s.phase is None:
+        # Entering the workflow at the first phase
+        target = args.to_phase or phase_names[0]
+    else:
+        if args.to_phase:
+            target = args.to_phase
+        else:
+            try:
+                idx = phase_names.index(s.phase)
+            except ValueError:
+                print(f"current phase '{s.phase}' not in workflow '{s.workflow}'", file=sys.stderr)
+                return 1
+            if idx + 1 >= len(phase_names):
+                print(f"story already at terminal phase '{s.phase}'", file=sys.stderr)
+                return 1
+            target = phase_names[idx + 1]
+        # Gate-pass check unless --force
+        if not args.force:
+            cur_history = [h for h in s.phase_history if h.get("phase") == s.phase]
+            if not cur_history or cur_history[-1].get("gate_result") != "pass":
+                print(
+                    f"phase '{s.phase}' has no recorded gate-pass. Use `brm story gate` + "
+                    f"`brm story record-gate` first, or pass --force.",
+                    file=sys.stderr,
+                )
+                return 1
+    if target not in phase_names:
+        print(f"target phase '{target}' not in workflow '{s.workflow}'", file=sys.stderr)
+        return 1
+    now = datetime.now(timezone.utc).isoformat()
+    s.phase = target
+    if s.status == "draft":
+        s.status = "in_progress"
+    s.phase_history.append({"phase": target, "entered": now, "exited": None, "gate_result": None})
+    _save_story(args.epic_slug, s)
+    print(f"advanced to phase '{target}'")
+    return 0
+
+
 def _register() -> None:
     """Append story-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -411,6 +459,15 @@ def _register() -> None:
         src.add_argument("--result-stdin", action="store_true")
         src.add_argument("--result-file", default=None)
 
+    def _add_advance(verb_subs):
+        p = verb_subs.add_parser("advance", help="Advance story to next phase")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+        p.add_argument("--to", dest="to_phase", default=None,
+                       help="Explicit target phase (default: workflow's next)")
+        p.add_argument("--force", action="store_true",
+                       help="Skip gate-pass requirement")
+
     _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
     _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
     _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
@@ -418,9 +475,11 @@ def _register() -> None:
     _handoff_name = f"{_add_handoff.__module__}.{_add_handoff.__qualname__}"
     _gate_name = f"{_add_gate.__module__}.{_add_gate.__qualname__}"
     _record_gate_name = f"{_add_record_gate.__module__}.{_add_record_gate.__qualname__}"
+    _advance_name = f"{_add_advance.__module__}.{_add_advance.__qualname__}"
     _dedup_names = (
         _split_name, _list_name, _describe_name, _status_name, _switch_name,
         _handoff_name, _gate_name, _record_gate_name,
+        _advance_name,
     )
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
@@ -443,6 +502,8 @@ def _register() -> None:
     handler.dispatch_gate = dispatch_gate
     handler.add_subparsers.append(_add_record_gate)
     setattr(handler, "dispatch_record-gate", dispatch_record_gate)
+    handler.add_subparsers.append(_add_advance)
+    handler.dispatch_advance = dispatch_advance
 
 
 _register()
