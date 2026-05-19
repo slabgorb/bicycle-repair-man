@@ -259,3 +259,27 @@ Body.
     assert len(s2.acceptance) == 2
     assert s2.acceptance[0]["text"] == "first" and s2.acceptance[0]["done"] is True
     assert s2.acceptance[1]["text"] == "second" and s2.acceptance[1]["done"] is False
+
+
+def test_slug_rename_without_force_warns_and_skips(tmp_path):
+    plan = """# Plan
+
+## Story: One
+
+```yaml
+slug: 01-one
+acceptance: []
+```
+
+Body.
+"""
+    _bootstrap_epic_with_plan(tmp_path, plan)
+    _run("story", "split", "demo", cwd=tmp_path)
+    # Rename slug in plan
+    renamed = plan.replace("slug: 01-one", "slug: 01-renamed")
+    (tmp_path / ".brm" / "epics" / "demo" / "plan.md").write_text(renamed)
+    r = _run("story", "split", "demo", cwd=tmp_path)
+    # Without --force, the new slug creates a new file; the old becomes orphan
+    assert (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-one.md").is_file()
+    assert (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-renamed.md").is_file()
+    assert "orphan" in r.stderr.lower() or "no longer" in r.stderr.lower()
