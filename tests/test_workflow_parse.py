@@ -127,11 +127,12 @@ def test_validate_rejects_each_on_repos(tmp_path: Path):
         load_workflow("tdd", plugin_root=tmp_path)
 
 
-def test_validate_rejects_reserved_expansion(tmp_path: Path):
-    bad = VALID_TDD.replace("expansion: per-repo", "expansion: as-written")
-    _write_workflow(tmp_path, "tdd", bad)
-    with pytest.raises(WorkflowSchemaError, match="as-written"):
-        load_workflow("tdd", plugin_root=tmp_path)
+def test_validate_accepts_as_written_expansion(tmp_path: Path):
+    """as-written expansion is now valid (v0.4+)."""
+    good = VALID_TDD.replace("expansion: per-repo", "expansion: as-written")
+    _write_workflow(tmp_path, "tdd", good)
+    wf = load_workflow("tdd", plugin_root=tmp_path)
+    assert wf.expansion == "as-written"
 
 
 def test_validate_duplicate_phase_names(tmp_path: Path):
@@ -259,3 +260,30 @@ workflow:
     import pytest
     with pytest.raises(_wf.WorkflowSchemaError, match="ghost-agent"):
         _wf._parse_workflow(yml)
+
+
+def test_manual_expansion_is_rejected():
+    from lib import workflow as _wf
+    import pytest
+    yml = """
+workflow:
+  name: x
+  expansion: manual
+  phases:
+    - { name: a, agent: pm }
+"""
+    with pytest.raises(_wf.WorkflowSchemaError, match="expansion"):
+        _wf._parse_workflow(yml)
+
+
+def test_as_written_expansion_accepted():
+    from lib import workflow as _wf
+    yml = """
+workflow:
+  name: x
+  expansion: as-written
+  phases:
+    - { name: a, agent: pm }
+"""
+    wf = _wf._parse_workflow(yml)
+    assert wf.expansion == "as-written"

@@ -7,8 +7,8 @@ from typing import Any
 
 import yaml
 
-_VALID_EXPANSIONS = ("per-repo",)  # as-written and manual reserved for v0.4+
-_RESERVED_EXPANSIONS = ("as-written", "manual")
+_VALID_EXPANSIONS = ("per-repo", "as-written")
+_RESERVED_EXPANSIONS = ()
 
 
 class WorkflowSchemaError(Exception):
