@@ -94,3 +94,16 @@ def test_brm_design_shim_still_routes_subcommand():
     assert r.returncode in (0, 2)
     # Either the legacy status help, or a deprecation pointer to `brm epic`.
     assert "status" in (r.stdout + r.stderr).lower()
+
+
+BRM_REPOS = PLUGIN_ROOT / "scripts" / "brm-repos"
+
+
+def test_brm_repos_shim_prints_deprecation_warning():
+    r = subprocess.run(
+        [sys.executable, str(BRM_REPOS), "--help"],
+        cwd=PLUGIN_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert "deprecated" in r.stderr.lower() or "deprecat" in r.stderr.lower()
