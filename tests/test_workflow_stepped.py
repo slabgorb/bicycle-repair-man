@@ -67,3 +67,50 @@ def test_parse_step_missing_meta_raises():
     bad = STEP_TEXT.replace("<step-meta>", "<mtea>")
     with pytest.raises(_step.StepSchemaError, match="step-meta"):
         _step.parse_step_text(bad)
+
+
+def test_stepped_workflow_loads_with_steps_dir(tmp_path):
+    from lib import workflow as _wf
+    (tmp_path / "myflow").mkdir()
+    (tmp_path / "myflow" / "steps").mkdir()
+    (tmp_path / "myflow" / "steps" / "step-01-init.md").write_text(STEP_TEXT)
+    (tmp_path / "myflow" / "steps" / "step-02-finish.md").write_text(
+        STEP_TEXT.replace("number: 1", "number: 2")
+                 .replace("name: initialize", "name: finish")
+                 .replace("next: step-02-context", "next: null")
+    )
+    (tmp_path / "myflow.yaml").write_text("""
+workflow:
+  name: myflow
+  type: stepped
+  agent: architect
+  steps:
+    path: ./myflow/steps/
+    pattern: 'step-{nn}-*.md'
+""")
+    from pathlib import Path as _P
+    plugin_root = _P(__file__).resolve().parent.parent
+    wf = _wf.load_workflow_file(tmp_path / "myflow.yaml", plugin_root=plugin_root)
+    assert wf.type == "stepped"
+    assert wf.agent == "architect"
+    assert wf.steps is not None
+    assert len(wf.steps) == 2
+    assert wf.steps[0].name == "initialize"
+
+
+def test_stepped_workflow_rejects_expansion_field(tmp_path):
+    from lib import workflow as _wf
+    (tmp_path / "myflow.yaml").write_text("""
+workflow:
+  name: myflow
+  type: stepped
+  agent: architect
+  expansion: per-repo
+  steps:
+    path: ./myflow/steps/
+""")
+    import pytest
+    from pathlib import Path as _P
+    plugin_root = _P(__file__).resolve().parent.parent
+    with pytest.raises(_wf.WorkflowSchemaError, match="expansion"):
+        _wf.load_workflow_file(tmp_path / "myflow.yaml", plugin_root=plugin_root)

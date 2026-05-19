@@ -38,6 +38,10 @@ class Workflow:
     description: str = ""
     version: str = ""
     expansion: str = "per-repo"
+    type: str = "phased"
+    agent: str | None = None
+    steps: list | None = None
+    steps_dir_relative: str | None = None
 
 
 def load_workflow(
@@ -54,8 +58,9 @@ def load_workflow_file(
     path: Path, *, plugin_root: Path, project_root: Path | None = None,
 ) -> Workflow:
     """Load and validate a workflow from a specific file path."""
-    text = path.read_text(encoding="utf-8")
-    return _parse_workflow(text, plugin_root=plugin_root, project_root=project_root)
+    return _parse_workflow(path.read_text(encoding="utf-8"),
+                           plugin_root=plugin_root, project_root=project_root,
+                           yaml_path=path)
 
 
 def _candidates(name: str, plugin_root: Path, orchestrator_root: Path | None):
@@ -96,6 +101,7 @@ def _parse_workflow(
     text: str,
     plugin_root: Path | None = None,
     project_root: Path | None = None,
+    yaml_path: Path | None = None,
 ) -> Workflow:
     try:
         doc = yaml.safe_load(text)
@@ -105,6 +111,36 @@ def _parse_workflow(
         raise WorkflowSchemaError("workflow file must have a top-level 'workflow' key")
     wf = doc["workflow"]
 
+    wf_type = str(wf.get("type", "phased"))
+    if wf_type not in ("phased", "stepped"):
+        raise WorkflowSchemaError(f"unknown type: {wf_type!r}")
+
+    if wf_type == "stepped":
+        if "expansion" in wf:
+            raise WorkflowSchemaError("expansion: is not allowed on type: stepped workflows")
+        if "phases" in wf:
+            raise WorkflowSchemaError("phases: is not allowed on type: stepped (use steps:)")
+        steps_block = wf.get("steps")
+        if not isinstance(steps_block, dict) or "path" not in steps_block:
+            raise WorkflowSchemaError("stepped workflows require `steps:` with `path:`")
+        steps_rel = str(steps_block["path"])
+        agent = wf.get("agent")
+        if not agent:
+            raise WorkflowSchemaError("stepped workflows require workflow-level `agent:`")
+        _validate_agent(agent, plugin_root=plugin_root, project_root=project_root)
+        if yaml_path is None:
+            raise WorkflowSchemaError("stepped workflows must be loaded via load_workflow_file")
+        steps_dir = (yaml_path.parent / steps_rel).resolve()
+        from lib import step as _step_mod
+        steps = _step_mod.load_steps_dir(steps_dir)
+        return Workflow(
+            name=str(wf["name"]), description=str(wf.get("description", "")),
+            version=str(wf.get("version", "")), type="stepped",
+            agent=agent, steps=steps, steps_dir_relative=steps_rel,
+            phases=[],
+        )
+
+    # phased branch — existing logic
     expansion = wf.get("expansion", "per-repo")
     if expansion in _RESERVED_EXPANSIONS:
         raise WorkflowSchemaError(
@@ -131,6 +167,7 @@ def _parse_workflow(
         version=wf.get("version", "") or "",
         expansion=expansion,
         phases=phases,
+        type="phased",
     )
     validate_workflow(out)
     return out
