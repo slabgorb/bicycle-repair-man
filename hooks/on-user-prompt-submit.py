@@ -26,6 +26,8 @@ PLUGIN_ROOT = HOOK_DIR.parent
 sys.path.insert(0, str(PLUGIN_ROOT))
 
 from lib import sidecar as _sidecar  # noqa: E402
+from lib import epic as _epic_mod  # noqa: E402
+from lib import story as _story_mod  # noqa: E402
 
 
 def _emit(additional_context: str) -> None:
@@ -182,6 +184,10 @@ def _render_orchestrator_block(orch_root: Path, cwd: Path) -> str | None:
     )
 
 
+def _render_story_block(story_file: Path) -> str:
+    return ""  # Task F2
+
+
 def main() -> int:
     try:
         raw = sys.stdin.read()
@@ -236,6 +242,19 @@ def main() -> int:
             if design_path:
                 design_block = _render_design_block(design_path, role)
 
+        # v0.4: <brm-epic> + <brm-story>
+        epic_block = None
+        story_block = None
+        if role in _sidecar.ROLES:
+            active = _epic_mod.find_active_epic(cwd)
+            if active is not None:
+                e, epic_dir = active
+                epic_block = _epic_mod.render_epic_block(e, stories_root=epic_dir / "stories")
+                if e.current_story:
+                    story_file = epic_dir / "stories" / f"{e.current_story}.md"
+                    if story_file.is_file():
+                        story_block = _render_story_block(story_file)
+
         pieces: list[str] = []
         if sidecar_block:
             pieces.append(sidecar_block.rstrip("\n"))
@@ -243,6 +262,10 @@ def main() -> int:
             pieces.append(orchestrator_block.rstrip("\n"))
         if design_block:
             pieces.append(design_block.rstrip("\n"))
+        if epic_block:
+            pieces.append(epic_block.rstrip("\n"))
+        if story_block:
+            pieces.append(story_block.rstrip("\n"))
         _emit("\n".join(pieces) + "\n" if pieces else "")
         return 0
     except Exception:
