@@ -184,3 +184,25 @@ def test_register_is_idempotent_on_reload():
     # duplicate adder would raise here.
     parser = dispatcher._build_parser()
     assert parser is not None
+
+
+def test_brm_epic_list_empty(tmp_path):
+    (tmp_path / ".brm" / "epics").mkdir(parents=True)
+    r = _run_brm("epic", "list", cwd=tmp_path)
+    assert r.returncode == 0
+    assert "no epics" in r.stdout.lower() or r.stdout.strip() == ""
+
+
+def test_brm_epic_list_shows_created_epics(tmp_path):
+    for slug in ("alpha", "beta"):
+        _run_brm("epic", "create", slug, "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    r = _run_brm("epic", "list", cwd=tmp_path)
+    assert r.returncode == 0
+    assert "alpha" in r.stdout
+    assert "beta" in r.stdout
+
+
+def test_brm_epic_list_filters_by_status(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    r = _run_brm("epic", "list", "--status", "active", cwd=tmp_path)
+    assert "alpha" not in r.stdout  # alpha is draft, not active

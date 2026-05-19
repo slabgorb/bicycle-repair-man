@@ -50,6 +50,12 @@ def _add_create(verb_subs: argparse._SubParsersAction) -> None:
     )
 
 
+def _add_list(verb_subs: argparse._SubParsersAction) -> None:
+    p = verb_subs.add_parser("list", help="List epics")
+    p.add_argument("--status", choices=("draft", "active", "done", "all"), default="all")
+    p.add_argument("--json", action="store_true")
+
+
 def dispatch_create(args: argparse.Namespace) -> int:
     slug = args.slug
     if not _SLUG_RE.fullmatch(slug):
@@ -91,6 +97,41 @@ def dispatch_create(args: argparse.Namespace) -> int:
     return 0
 
 
+def dispatch_list(args: argparse.Namespace) -> int:
+    import json
+    epics_root = Path.cwd() / ".brm" / "epics"
+    if not epics_root.is_dir():
+        if args.json:
+            print("[]")
+        else:
+            print("(no epics)")
+        return 0
+    entries = []
+    for epic_dir in sorted(epics_root.iterdir()):
+        epic_file = epic_dir / "epic.md"
+        if not epic_file.is_file():
+            continue
+        try:
+            e = _epic.parse_epic_text(epic_file.read_text())
+        except _epic.EpicSchemaError:
+            continue
+        if args.status != "all" and e.status != args.status:
+            continue
+        entries.append(e)
+    if args.json:
+        print(json.dumps([
+            {"slug": e.slug, "title": e.title, "status": e.status,
+             "workflow": e.workflow, "repos": e.repos}
+            for e in entries
+        ], indent=2))
+    else:
+        if not entries:
+            print("(no epics)")
+        for e in entries:
+            print(f"  {e.status:8s}  {e.slug:30s}  {e.title}")
+    return 0
+
+
 def _register() -> None:
     """Append epic-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -98,17 +139,20 @@ def _register() -> None:
         "epic", "Manage epics (the folder/spec layer above stories)"
     )
     # Guard against double-registration on module reload — argparse would
-    # otherwise raise `ValueError: conflicting subparser: create`.  We can't
-    # rely on object identity because a reload creates fresh function
+    # otherwise raise `ValueError: conflicting subparser: create` or `list`.
+    # We can't rely on object identity because a reload creates fresh function
     # objects, so dedupe by qualified name.
     _create_name = f"{_add_create.__module__}.{_add_create.__qualname__}"
+    _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
         if f"{getattr(a, '__module__', '')}.{getattr(a, '__qualname__', '')}"
-        != _create_name
+        not in (_create_name, _list_name)
     ]
     handler.add_subparsers.append(_add_create)
+    handler.add_subparsers.append(_add_list)
     handler.dispatch_create = dispatch_create
+    handler.dispatch_list = dispatch_list
 
 
 _register()
