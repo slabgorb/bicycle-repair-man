@@ -174,6 +174,34 @@ def dispatch_describe(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_activate(verb_subs: argparse._SubParsersAction) -> None:
+    p = verb_subs.add_parser("activate", help="Transition epic from draft to active")
+    p.add_argument("slug")
+
+
+def dispatch_activate(args: argparse.Namespace) -> int:
+    try:
+        e = _load_epic(args.slug)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if e.status != "draft":
+        print(f"epic must be in 'draft' to activate (currently {e.status})", file=sys.stderr)
+        return 1
+    if e.spec_approval and e.spec_approval.required and not e.spec_approval.approved_at:
+        print(
+            f"epic '{args.slug}' requires spec approval. Run the gate via "
+            f"`brm epic gate {args.slug}` (added in Phase F) and record the result "
+            f"via `brm epic record-gate {args.slug} --result-stdin`.",
+            file=sys.stderr,
+        )
+        return 1
+    e.status = "active"
+    _epic_path(args.slug).write_text(_epic.serialize_epic(e))
+    print(f"epic '{args.slug}' activated")
+    return 0
+
+
 def dispatch_status(args: argparse.Namespace) -> int:
     try:
         e = _load_epic(args.slug)
@@ -202,19 +230,22 @@ def _register() -> None:
     _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
     _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
     _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
+    _activate_name = f"{_add_activate.__module__}.{_add_activate.__qualname__}"
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
         if f"{getattr(a, '__module__', '')}.{getattr(a, '__qualname__', '')}"
-        not in (_create_name, _list_name, _describe_name, _status_name)
+        not in (_create_name, _list_name, _describe_name, _status_name, _activate_name)
     ]
     handler.add_subparsers.append(_add_create)
     handler.add_subparsers.append(_add_list)
     handler.add_subparsers.append(_add_describe)
     handler.add_subparsers.append(_add_status)
+    handler.add_subparsers.append(_add_activate)
     handler.dispatch_create = dispatch_create
     handler.dispatch_list = dispatch_list
     handler.dispatch_describe = dispatch_describe
     handler.dispatch_status = dispatch_status
+    handler.dispatch_activate = dispatch_activate
 
 
 _register()

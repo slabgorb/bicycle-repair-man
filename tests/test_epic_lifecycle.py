@@ -231,3 +231,37 @@ def test_brm_epic_status_includes_story_rollup(tmp_path):
     # No stories yet, so the rollup shows zero stories
     assert "stories" in r.stdout.lower()
     assert "0" in r.stdout
+
+
+def test_brm_epic_activate_without_approval(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    r = _run_brm("epic", "activate", "alpha", cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    from lib import epic as _epic
+    e = _epic.parse_epic_text(
+        (tmp_path / ".brm" / "epics" / "alpha" / "epic.md").read_text()
+    )
+    assert e.status == "active"
+
+
+def test_brm_epic_activate_with_approval_required_blocks(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm",
+             "--require-approval", cwd=tmp_path)
+    r = _run_brm("epic", "activate", "alpha", cwd=tmp_path)
+    assert r.returncode != 0
+    assert "approval" in (r.stdout + r.stderr).lower()
+
+
+def test_brm_epic_activate_with_approval_passes_when_recorded(tmp_path):
+    _run_brm("epic", "create", "alpha", "--workflow", "tdd", "--repos", "brm",
+             "--require-approval", cwd=tmp_path)
+    # Simulate gate-pass recording (Phase F adds record-gate; for this test we
+    # write the approval block directly).
+    epic_file = tmp_path / ".brm" / "epics" / "alpha" / "epic.md"
+    text = epic_file.read_text().replace(
+        "spec_approval:\n  required: true\n",
+        "spec_approval:\n  required: true\n  approved_at: 2026-05-19T10:00:00Z\n  approver: keith\n",
+    )
+    epic_file.write_text(text)
+    r = _run_brm("epic", "activate", "alpha", cwd=tmp_path)
+    assert r.returncode == 0
