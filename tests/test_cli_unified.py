@@ -67,3 +67,30 @@ def test_brm_help_version_exits_zero():
 def test_brm_help_help_exits_zero():
     r = _run("help", "help")
     assert r.returncode == 0, f"`brm help help` should exit 0, got {r.returncode}: {r.stderr!r}"
+
+
+BRM_DESIGN = PLUGIN_ROOT / "scripts" / "brm-design"
+
+
+def _run_legacy(*args):
+    return subprocess.run(
+        [sys.executable, str(BRM_DESIGN), *args],
+        cwd=PLUGIN_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_brm_design_shim_prints_deprecation_warning():
+    """Legacy `brm-design init` should still work but warn on stderr."""
+    r = _run_legacy("--help")
+    assert r.returncode in (0, 2)  # argparse prints help and exits 0
+    assert "deprecated" in r.stderr.lower() or "deprecat" in r.stderr.lower()
+
+
+def test_brm_design_shim_still_routes_subcommand():
+    """The shim must not break existing v0.3 callers."""
+    r = _run_legacy("status", "--help")
+    assert r.returncode in (0, 2)
+    # Either the legacy status help, or a deprecation pointer to `brm epic`.
+    assert "status" in (r.stdout + r.stderr).lower()
