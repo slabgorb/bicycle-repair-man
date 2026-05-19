@@ -80,3 +80,21 @@ def test_parse_agent_unknown_kind_raises():
     bad = AGENT_TEXT.replace("**Kind:** tactical", "**Kind:** nonsense")
     with pytest.raises(_agent.AgentSchemaError, match="kind"):
         _agent.parse_agent_text(bad, name="reviewer")
+
+
+def test_strategic_template_parses_and_has_required_tags():
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / "agents" / "templates" / "strategic.md").read_text()
+    # Templates have placeholder name; parse with a fixed name
+    a = _agent.parse_agent_text(text, name="template-strategic")
+    assert a.kind == "strategic"
+    for tag in ("persona", "role", "responsibilities", "skills", "context",
+                "on-activation", "handoff", "exit"):
+        assert f"<{tag}>" in text
+
+
+def test_tactical_template_parses_and_has_required_tags():
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / "agents" / "templates" / "tactical.md").read_text()
+    a = _agent.parse_agent_text(text, name="template-tactical")
+    assert a.kind == "tactical"
