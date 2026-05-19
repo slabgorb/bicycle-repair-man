@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re as _re
 import sys
 from pathlib import Path
 
@@ -253,6 +254,46 @@ def dispatch_switch(args: argparse.Namespace) -> int:
     return 0
 
 
+_HANDOFF_OPEN_RE = _re.compile(
+    r'<handoff\s+from="([^"]+)"\s+to="([^"]+)"\s+repo="([^"]+)"\s+'
+    r'agent="([^"]+)"\s+at="([^"]+)"\s*>'
+)
+
+
+def dispatch_handoff(args: argparse.Namespace) -> int:
+    try:
+        slug = _resolve_story_slug(args.epic_slug, args.story_slug)
+        s = _load_story(args.epic_slug, slug)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr); return 1
+
+    if args.stdin:
+        block = sys.stdin.read()
+    else:
+        block = Path(args.file).read_text()
+
+    m = _HANDOFF_OPEN_RE.search(block)
+    if not m:
+        print("input does not contain a valid <handoff ...> block", file=sys.stderr)
+        return 1
+    body_match = _re.search(r'<handoff[^>]*>\s*(.*?)\s*</handoff>', block, _re.DOTALL)
+    body_text = body_match.group(1) if body_match else ""
+
+    s.last_handoff = {
+        "from": args.from_phase,
+        "to": args.to_phase,
+        "at": m.group(5),
+        "body": body_text,
+    }
+    # Append to body log
+    if "## Handoff log" not in s.body:
+        s.body += "\n\n## Handoff log\n"
+    s.body += f"\n### {args.from_phase} → {args.to_phase} ({m.group(5)})\n\n{body_text}\n"
+    _save_story(args.epic_slug, s)
+    print(f"handoff recorded: {args.from_phase} → {args.to_phase}")
+    return 0
+
+
 def _register() -> None:
     """Append story-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -283,11 +324,24 @@ def _register() -> None:
         p.add_argument("epic_slug")
         p.add_argument("story_slug")
 
+    def _add_handoff(verb_subs):
+        p = verb_subs.add_parser("handoff", help="Record a phase handoff")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+        p.add_argument("--from", dest="from_phase", required=True)
+        p.add_argument("--to", dest="to_phase", required=True)
+        src = p.add_mutually_exclusive_group(required=True)
+        src.add_argument("--file", default=None)
+        src.add_argument("--stdin", action="store_true")
+
     _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
     _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
     _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
     _switch_name = f"{_add_switch.__module__}.{_add_switch.__qualname__}"
-    _dedup_names = (_split_name, _list_name, _describe_name, _status_name, _switch_name)
+    _handoff_name = f"{_add_handoff.__module__}.{_add_handoff.__qualname__}"
+    _dedup_names = (
+        _split_name, _list_name, _describe_name, _status_name, _switch_name, _handoff_name
+    )
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
         if f"{getattr(a, '__module__', '')}.{getattr(a, '__qualname__', '')}"
@@ -303,6 +357,8 @@ def _register() -> None:
     handler.dispatch_status = dispatch_status
     handler.add_subparsers.append(_add_switch)
     handler.dispatch_switch = dispatch_switch
+    handler.add_subparsers.append(_add_handoff)
+    handler.dispatch_handoff = dispatch_handoff
 
 
 _register()

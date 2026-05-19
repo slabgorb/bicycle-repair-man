@@ -70,3 +70,39 @@ def test_story_status_unknown_story_errors(tmp_path):
     _setup_epic_with_two_stories(tmp_path)
     r = _run("story", "status", "demo", "--story", "99-nope", cwd=tmp_path)
     assert r.returncode != 0
+
+
+HANDOFF_BLOCK = """<handoff from="tea" to="dev" repo="brm" agent="tea" at="2026-05-19T15:00:00Z">
+Tests are failing as expected. Two ACs covered. Next step: implement parser.
+</handoff>
+"""
+
+
+def test_story_handoff_records_block(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    r = subprocess.run(
+        [sys.executable, str(BRM), "story", "handoff", "demo",
+         "--story", "01-first", "--from", "tea", "--to", "dev", "--stdin"],
+        cwd=tmp_path, input=HANDOFF_BLOCK, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    from lib import story as _story
+    s = _story.parse_story_text(
+        (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md").read_text()
+    )
+    assert s.last_handoff is not None
+    assert s.last_handoff["from"] == "tea"
+    assert s.last_handoff["to"] == "dev"
+    assert "Tests are failing" in s.last_handoff["body"]
+
+
+def test_story_handoff_appends_to_body_log(tmp_path):
+    _setup_epic_with_two_stories(tmp_path)
+    subprocess.run(
+        [sys.executable, str(BRM), "story", "handoff", "demo",
+         "--story", "01-first", "--from", "tea", "--to", "dev", "--stdin"],
+        cwd=tmp_path, input=HANDOFF_BLOCK, capture_output=True, text=True,
+    )
+    body = (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-first.md").read_text()
+    assert "## Handoff log" in body
+    assert "Tests are failing" in body
