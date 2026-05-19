@@ -179,3 +179,37 @@ workflow:
     plugin_root = _P(__file__).resolve().parent.parent
     with pytest.raises(_wf.WorkflowSchemaError, match="expansion"):
         _wf.load_workflow_file(tmp_path / "myflow.yaml", plugin_root=plugin_root)
+
+
+def test_stepped_workflow_gate_emits_gate_text(tmp_path):
+    """For stepped workflows, `brm story gate` should print the step's <gate> body."""
+    import subprocess, sys
+    from pathlib import Path as _P
+    BRM = _P(__file__).resolve().parent.parent / "scripts" / "brm"
+
+    # Use the built-in architecture stepped workflow (step-02-context has gate: true).
+    subprocess.run([sys.executable, str(BRM), "epic", "create", "demo",
+                    "--workflow", "architecture", "--repos", "brm"], cwd=tmp_path, check=True)
+    plan = """# Plan
+
+## Story: First
+
+```yaml
+slug: 01-first
+acceptance: []
+```
+
+Body.
+"""
+    (tmp_path / ".brm" / "epics" / "demo" / "plan.md").write_text(plan)
+    subprocess.run([sys.executable, str(BRM), "story", "split", "demo"], cwd=tmp_path, check=True)
+    # Advance to step-02 "context" (which has gate: true in architecture workflow)
+    subprocess.run([sys.executable, str(BRM), "story", "advance", "demo",
+                    "--story", "01-first"], cwd=tmp_path, check=True)
+    subprocess.run([sys.executable, str(BRM), "story", "advance", "demo",
+                    "--story", "01-first"], cwd=tmp_path, check=True)
+    r = subprocess.run([sys.executable, str(BRM), "story", "gate", "demo",
+                        "--story", "01-first"],
+                       cwd=tmp_path, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "Completion criteria" in r.stdout or "criteria" in r.stdout.lower()

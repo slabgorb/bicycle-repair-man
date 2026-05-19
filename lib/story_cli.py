@@ -297,14 +297,31 @@ def dispatch_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
-def _resolve_gate_file(workflow_name: str, phase_name: str) -> Path | None:
+def _resolve_gate_text(workflow_name: str, phase_name: str) -> str | None:
+    """Return the gate prompt text for the named phase/step, or None if no gate."""
     plugin_root = Path(__file__).resolve().parent.parent
-    wf = _workflow_mod.load_workflow(workflow_name, plugin_root=plugin_root)
+    # Try project-level override first (consistent with dispatch_advance).
+    wf_path = None
+    for cand in (
+        Path.cwd() / ".brm" / "workflows" / f"{workflow_name}.yaml",
+        plugin_root / "workflows" / f"{workflow_name}.yaml",
+    ):
+        if cand.is_file():
+            wf_path = cand; break
+    if wf_path is None:
+        return None
+    wf = _workflow_mod.load_workflow_file(wf_path, plugin_root=plugin_root)
+    if wf.type == "stepped":
+        for st in (wf.steps or []):
+            if st.name == phase_name and st.gate and st.gate_text:
+                return st.gate_text
+        return None
+    # phased — existing behavior, return gate file content
     for ph in wf.phases:
         if ph.name == phase_name and ph.gate:
             gate_file = plugin_root / f"{ph.gate.file}.md"
             if gate_file.is_file():
-                return gate_file
+                return gate_file.read_text()
     return None
 
 
@@ -316,10 +333,10 @@ def dispatch_gate(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr); return 1
     if not s.phase:
         print("story has no active phase", file=sys.stderr); return 1
-    gate_file = _resolve_gate_file(s.workflow, s.phase)
-    if gate_file is None:
+    gate_text = _resolve_gate_text(s.workflow, s.phase)
+    if gate_text is None:
         print(f"phase '{s.phase}' has no gate defined", file=sys.stderr); return 1
-    print(gate_file.read_text())
+    print(gate_text)
     return 0
 
 
