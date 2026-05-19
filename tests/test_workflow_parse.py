@@ -214,11 +214,15 @@ def test_builtin_workflows_load():
     for name in ("tdd", "patch", "docs", "architecture"):
         wf = load_workflow(name, plugin_root=plugin_root)
         assert wf.name == name
-        assert wf.phases, f"{name} has no phases"
-        # All built-ins must end with a finish phase owned by pm.
-        last = wf.phases[-1]
-        assert last.name == "finish"
-        assert last.agent == "pm"
+        if wf.type == "stepped":
+            # Stepped workflows carry steps, not phases.
+            assert wf.steps, f"{name} has no steps"
+        else:
+            assert wf.phases, f"{name} has no phases"
+            # Phased built-ins must end with a finish phase owned by pm.
+            last = wf.phases[-1]
+            assert last.name == "finish"
+            assert last.agent == "pm"
 
 
 def test_workflow_with_custom_agent_passes_when_discovered(tmp_path):

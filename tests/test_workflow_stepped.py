@@ -152,6 +152,17 @@ Body.
     assert s.phase == "initialize"
 
 
+def test_builtin_architecture_workflow_is_stepped():
+    from lib import workflow as _wf
+    from pathlib import Path as _P
+    plugin_root = _P(__file__).resolve().parent.parent
+    wf = _wf.load_workflow_file(plugin_root / "workflows" / "architecture.yaml",
+                                plugin_root=plugin_root)
+    assert wf.type == "stepped"
+    assert wf.agent == "architect"
+    assert wf.steps is not None and len(wf.steps) >= 5
+
+
 def test_stepped_workflow_rejects_expansion_field(tmp_path):
     from lib import workflow as _wf
     (tmp_path / "myflow.yaml").write_text("""
