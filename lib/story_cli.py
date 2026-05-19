@@ -115,9 +115,28 @@ def dispatch_split(args: argparse.Namespace) -> int:
     for ps in plan.stories:
         target = stories_dir / f"{ps.slug}.md"
         if target.is_file():
-            # Re-split merge handled in Task D3.
+            existing = _story.parse_story_text(target.read_text())
+            existing.title = ps.title  # title can change with header rename
+            # Workflow override: plan wins if present, else keep what's there
+            if ps.workflow is not None:
+                existing.workflow = ps.workflow
+            if ps.repos is not None:
+                existing.repos = list(ps.repos)
+            # Acceptance merge: preserve `done` flags by text match; new ACs unchecked
+            existing_by_text = {ac["text"]: ac for ac in existing.acceptance}
+            merged = []
+            for ac_text in ps.acceptance:
+                if ac_text in existing_by_text:
+                    merged.append(existing_by_text[ac_text])
+                else:
+                    merged.append({"done": False, "text": ac_text})
+            existing.acceptance = merged
+            # Body replaced verbatim
+            existing.body = f"# {ps.title}\n\n{ps.body}\n"
+            target.write_text(_story.serialize_story(existing))
             updated.append(target)
             continue
+        # New story (existing creation logic)
         story = _story.Story(
             slug=ps.slug,
             title=ps.title,
@@ -132,6 +151,16 @@ def dispatch_split(args: argparse.Namespace) -> int:
         )
         target.write_text(_story.serialize_story(story))
         created.append(target)
+
+    plan_slugs = {ps.slug for ps in plan.stories}
+    orphans = []
+    for sf in stories_dir.glob("*.md"):
+        slug = sf.stem
+        if slug not in plan_slugs:
+            orphans.append(sf.name)
+    if orphans:
+        print(f"warning: {len(orphans)} story file(s) no longer in plan: "
+              f"{', '.join(orphans)} (not deleted)", file=sys.stderr)
 
     print(f"created {len(created)} stories, updated {len(updated)}")
     return 0

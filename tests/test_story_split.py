@@ -188,3 +188,74 @@ def test_phase_history_preserved():
     out = _story.serialize_story(s)
     s2 = _story.parse_story_text(out)
     assert s2.phase_history == s.phase_history
+
+
+def test_resplit_preserves_phase_and_status(tmp_path):
+    plan = """# Plan
+
+## Story: One
+
+```yaml
+slug: 01-one
+acceptance:
+  - "AC text"
+```
+
+Body v1.
+"""
+    _bootstrap_epic_with_plan(tmp_path, plan)
+    _run("story", "split", "demo", cwd=tmp_path)
+    # Simulate work having occurred: phase advanced, status changed
+    story_path = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-one.md"
+    from lib import story as _story
+    s = _story.parse_story_text(story_path.read_text())
+    s.status = "in_progress"
+    s.phase = "green"
+    s.acceptance[0]["done"] = True
+    story_path.write_text(_story.serialize_story(s))
+
+    # Edit plan body and re-split
+    new_plan = plan.replace("Body v1.", "Body v2 with new content.")
+    (tmp_path / ".brm" / "epics" / "demo" / "plan.md").write_text(new_plan)
+    r = _run("story", "split", "demo", cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+
+    s2 = _story.parse_story_text(story_path.read_text())
+    assert s2.status == "in_progress"   # preserved
+    assert s2.phase == "green"           # preserved
+    assert s2.acceptance[0]["done"] is True  # preserved
+    assert "Body v2 with new content" in s2.body  # body replaced
+
+
+def test_resplit_adds_new_ac_unchecked(tmp_path):
+    plan = """# Plan
+
+## Story: One
+
+```yaml
+slug: 01-one
+acceptance:
+  - "first"
+```
+
+Body.
+"""
+    _bootstrap_epic_with_plan(tmp_path, plan)
+    _run("story", "split", "demo", cwd=tmp_path)
+    story_path = tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-one.md"
+    from lib import story as _story
+    s = _story.parse_story_text(story_path.read_text())
+    s.acceptance[0]["done"] = True
+    story_path.write_text(_story.serialize_story(s))
+
+    new_plan = plan.replace(
+        "  - \"first\"",
+        "  - \"first\"\n  - \"second\"",
+    )
+    (tmp_path / ".brm" / "epics" / "demo" / "plan.md").write_text(new_plan)
+    _run("story", "split", "demo", cwd=tmp_path)
+
+    s2 = _story.parse_story_text(story_path.read_text())
+    assert len(s2.acceptance) == 2
+    assert s2.acceptance[0]["text"] == "first" and s2.acceptance[0]["done"] is True
+    assert s2.acceptance[1]["text"] == "second" and s2.acceptance[1]["done"] is False
