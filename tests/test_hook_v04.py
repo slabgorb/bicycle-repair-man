@@ -81,6 +81,12 @@ def test_hook_non_match_still_zero_io(tmp_path):
 
 
 def test_cli_story_override_does_not_change_pointer(tmp_path):
+    """Regression: `brm story describe --story <other>` must be read-only.
+
+    The describe command resolves a story slug via --story override but should
+    never write the epic.current_story pointer. Only `brm story switch` is
+    allowed to mutate it.
+    """
     _bootstrap_active_epic(tmp_path)
     # Add a second story by adding to the plan and re-splitting
     plan = (tmp_path / ".brm" / "epics" / "demo" / "plan.md").read_text()
