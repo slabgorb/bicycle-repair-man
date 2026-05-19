@@ -101,3 +101,32 @@ def parse_plan_text(text: str) -> Plan:
         plan.stories.append(story)
 
     return plan
+
+
+def validate_plan(
+    plan: Plan,
+    *,
+    known_repos: set[str],
+    known_workflows: set[str],
+) -> list[str]:
+    """Cross-validate parsed plan against orchestrator and workflow registries.
+
+    Returns a list of human-readable error strings. Empty list = clean.
+    Errors are non-fatal at the parse layer; `brm story split` decides whether
+    to abort.
+    """
+    errors: list[str] = []
+    for s in plan.stories:
+        if s.workflow is not None and s.workflow not in known_workflows:
+            errors.append(
+                f"story '{s.slug}' (line {s.line}): unknown workflow '{s.workflow}' "
+                f"(known: {sorted(known_workflows)})"
+            )
+        if s.repos is not None:
+            for r in s.repos:
+                if r not in known_repos:
+                    errors.append(
+                        f"story '{s.slug}' (line {s.line}): unknown repo '{r}' "
+                        f"(known: {sorted(known_repos)})"
+                    )
+    return errors

@@ -1,6 +1,8 @@
 """Tests for plan.md parsing (## Story: markers + YAML fences)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from lib import plan as _plan
@@ -111,3 +113,26 @@ def test_parse_invalid_slug_format_raises():
     bad = PLAN_TEXT.replace("slug: 01-first", "slug: 01_First!")
     with pytest.raises(_plan.PlanParseError, match="slug"):
         _plan.parse_plan_text(bad)
+
+
+def test_validate_plan_against_orchestrator_passes_clean(tmp_path):
+    plan = _plan.parse_plan_text(PLAN_TEXT)
+    # Simulate orchestrator with repo "brm" present
+    known_repos = {"brm"}
+    known_workflows = {"tdd"}
+    errors = _plan.validate_plan(plan, known_repos=known_repos, known_workflows=known_workflows)
+    assert errors == []
+
+
+def test_validate_plan_flags_unknown_workflow():
+    text = PLAN_TEXT.replace("workflow: tdd", "workflow: doesnotexist")
+    plan = _plan.parse_plan_text(text)
+    errors = _plan.validate_plan(plan, known_repos={"brm"}, known_workflows={"tdd"})
+    assert any("doesnotexist" in e for e in errors)
+
+
+def test_validate_plan_flags_unknown_repo():
+    text = PLAN_TEXT.replace("repos: [brm]", "repos: [phantom]")
+    plan = _plan.parse_plan_text(text)
+    errors = _plan.validate_plan(plan, known_repos={"brm"}, known_workflows={"tdd"})
+    assert any("phantom" in e for e in errors)
