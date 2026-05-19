@@ -166,6 +166,93 @@ def dispatch_split(args: argparse.Namespace) -> int:
     return 0
 
 
+def _stories_dir(epic_slug: str) -> Path:
+    return _epic_dir(epic_slug) / "stories"
+
+
+def _resolve_story_slug(epic_slug: str, explicit: str | None) -> str:
+    """If --story given, use it; otherwise read epic.current_story."""
+    if explicit:
+        return explicit
+    epic_file = _epic_dir(epic_slug) / "epic.md"
+    if not epic_file.is_file():
+        raise FileNotFoundError(f"epic '{epic_slug}' not found")
+    e = _epic.parse_epic_text(epic_file.read_text())
+    if not e.current_story:
+        raise ValueError(
+            f"epic '{epic_slug}' has no current_story pointer; pass --story <slug>"
+        )
+    return e.current_story
+
+
+def _load_story(epic_slug: str, story_slug: str) -> _story.Story:
+    path = _stories_dir(epic_slug) / f"{story_slug}.md"
+    if not path.is_file():
+        raise FileNotFoundError(f"story '{story_slug}' not found in epic '{epic_slug}'")
+    return _story.parse_story_text(path.read_text())
+
+
+def _save_story(epic_slug: str, s: _story.Story) -> None:
+    path = _stories_dir(epic_slug) / f"{s.slug}.md"
+    path.write_text(_story.serialize_story(s))
+
+
+def dispatch_list(args: argparse.Namespace) -> int:
+    sdir = _stories_dir(args.epic_slug)
+    if not sdir.is_dir():
+        print(f"epic '{args.epic_slug}' has no stories"); return 0
+    files = sorted(sdir.glob("*.md"))
+    if not files:
+        print("(no stories)"); return 0
+    for f in files:
+        try:
+            s = _story.parse_story_text(f.read_text())
+        except _story.StorySchemaError:
+            continue
+        phase = s.phase or "-"
+        print(f"  {s.status:11s}  {phase:10s}  {s.slug:30s}  {s.title}")
+    return 0
+
+
+def dispatch_describe(args: argparse.Namespace) -> int:
+    try:
+        slug = _resolve_story_slug(args.epic_slug, args.story_slug)
+        s = _load_story(args.epic_slug, slug)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr); return 1
+    print(f"slug:     {s.slug}")
+    print(f"title:    {s.title}")
+    print(f"epic:     {s.epic}")
+    print(f"workflow: {s.workflow}")
+    print(f"repos:    {', '.join(s.repos)}")
+    print(f"status:   {s.status}")
+    print(f"phase:    {s.phase or '-'}")
+    if s.acceptance:
+        print("acceptance:")
+        for ac in s.acceptance:
+            mark = "x" if ac.get("done") else " "
+            print(f"  [{mark}] {ac['text']}")
+    return 0
+
+
+def dispatch_status(args: argparse.Namespace) -> int:
+    return dispatch_describe(args)  # same content for now; richer rollup in Plan 2
+
+
+def dispatch_switch(args: argparse.Namespace) -> int:
+    epic_file = _epic_dir(args.epic_slug) / "epic.md"
+    if not epic_file.is_file():
+        print(f"epic '{args.epic_slug}' not found", file=sys.stderr); return 1
+    target = _stories_dir(args.epic_slug) / f"{args.story_slug}.md"
+    if not target.is_file():
+        print(f"story '{args.story_slug}' not found", file=sys.stderr); return 1
+    e = _epic.parse_epic_text(epic_file.read_text())
+    e.current_story = args.story_slug
+    epic_file.write_text(_epic.serialize_epic(e))
+    print(f"current_story set to {args.story_slug}")
+    return 0
+
+
 def _register() -> None:
     """Append story-noun parser builders to the unified CLI's NOUNS dict."""
     dispatcher = _find_dispatcher()
@@ -173,16 +260,49 @@ def _register() -> None:
         "story", "Manage stories (the implementation-unit layer)"
     )
     # Guard against double-registration on module reload — argparse would
-    # otherwise raise `ValueError: conflicting subparser: split`.
+    # otherwise raise `ValueError: conflicting subparser: split/list/...`.
     # Dedupe by qualified name (same pattern as lib/epic_cli.py).
     _split_name = f"{_add_split.__module__}.{_add_split.__qualname__}"
+
+    def _add_list(verb_subs):
+        p = verb_subs.add_parser("list", help="List stories in an epic")
+        p.add_argument("epic_slug")
+
+    def _add_describe(verb_subs):
+        p = verb_subs.add_parser("describe", help="Show story details")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+
+    def _add_status(verb_subs):
+        p = verb_subs.add_parser("status", help="Show story state")
+        p.add_argument("epic_slug")
+        p.add_argument("--story", dest="story_slug", default=None)
+
+    def _add_switch(verb_subs):
+        p = verb_subs.add_parser("switch", help="Set epic's current_story pointer")
+        p.add_argument("epic_slug")
+        p.add_argument("story_slug")
+
+    _list_name = f"{_add_list.__module__}.{_add_list.__qualname__}"
+    _describe_name = f"{_add_describe.__module__}.{_add_describe.__qualname__}"
+    _status_name = f"{_add_status.__module__}.{_add_status.__qualname__}"
+    _switch_name = f"{_add_switch.__module__}.{_add_switch.__qualname__}"
+    _dedup_names = (_split_name, _list_name, _describe_name, _status_name, _switch_name)
     handler.add_subparsers[:] = [
         a for a in handler.add_subparsers
         if f"{getattr(a, '__module__', '')}.{getattr(a, '__qualname__', '')}"
-        not in (_split_name,)
+        not in _dedup_names
     ]
     handler.add_subparsers.append(_add_split)
     handler.dispatch_split = dispatch_split
+    handler.add_subparsers.append(_add_list)
+    handler.dispatch_list = dispatch_list
+    handler.add_subparsers.append(_add_describe)
+    handler.dispatch_describe = dispatch_describe
+    handler.add_subparsers.append(_add_status)
+    handler.dispatch_status = dispatch_status
+    handler.add_subparsers.append(_add_switch)
+    handler.dispatch_switch = dispatch_switch
 
 
 _register()
