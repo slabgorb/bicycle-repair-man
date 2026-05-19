@@ -1,9 +1,128 @@
 """Tests for Story model and `brm story split`."""
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from lib import story as _story
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+BRM = PLUGIN_ROOT / "scripts" / "brm"
+
+
+def _run(*args, cwd=None):
+    return subprocess.run(
+        [sys.executable, str(BRM), *args],
+        cwd=cwd, capture_output=True, text=True,
+    )
+
+
+def _bootstrap_epic_with_plan(tmp_path, plan_body: str):
+    _run("epic", "create", "demo", "--workflow", "tdd", "--repos", "brm", cwd=tmp_path)
+    (tmp_path / ".brm" / "epics" / "demo" / "plan.md").write_text(plan_body)
+
+
+def test_split_creates_story_files(tmp_path):
+    plan = """# Plan
+
+## Story: First
+
+```yaml
+slug: 01-first
+acceptance:
+  - "first AC"
+```
+
+Body 1.
+
+## Story: Second
+
+```yaml
+slug: 02-second
+acceptance: []
+```
+
+Body 2.
+"""
+    _bootstrap_epic_with_plan(tmp_path, plan)
+    r = _run("story", "split", "demo", cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    stories_dir = tmp_path / ".brm" / "epics" / "demo" / "stories"
+    assert (stories_dir / "01-first.md").is_file()
+    assert (stories_dir / "02-second.md").is_file()
+
+
+def test_split_no_stories_in_plan_fails(tmp_path):
+    _bootstrap_epic_with_plan(tmp_path, "# Plan\n\nNo stories here.\n")
+    r = _run("story", "split", "demo", cwd=tmp_path)
+    assert r.returncode != 0
+    assert "## Story:" in r.stderr or "no stories" in r.stderr.lower()
+
+
+def test_split_malformed_yaml_fails_with_line_number(tmp_path):
+    plan = """# Plan
+
+## Story: Bad
+
+```yaml
+slug: 01-bad
+acceptance: [unclosed
+```
+
+Body.
+"""
+    _bootstrap_epic_with_plan(tmp_path, plan)
+    r = _run("story", "split", "demo", cwd=tmp_path)
+    assert r.returncode != 0
+    assert "line" in r.stderr.lower()
+
+
+def test_split_story_inherits_epic_workflow(tmp_path):
+    plan = """# Plan
+
+## Story: Inheriting
+
+```yaml
+slug: 01-inh
+acceptance: []
+```
+
+Body.
+"""
+    _bootstrap_epic_with_plan(tmp_path, plan)
+    _run("story", "split", "demo", cwd=tmp_path)
+    from lib import story as _story
+    s = _story.parse_story_text(
+        (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-inh.md").read_text()
+    )
+    assert s.workflow == "tdd"  # inherited from epic
+    assert s.repos == ["brm"]
+
+
+def test_split_story_override_workflow_wins(tmp_path):
+    plan = """# Plan
+
+## Story: Override
+
+```yaml
+slug: 01-ovr
+workflow: patch
+repos: [brm]
+acceptance: []
+```
+
+Body.
+"""
+    _bootstrap_epic_with_plan(tmp_path, plan)
+    _run("story", "split", "demo", cwd=tmp_path)
+    from lib import story as _story
+    s = _story.parse_story_text(
+        (tmp_path / ".brm" / "epics" / "demo" / "stories" / "01-ovr.md").read_text()
+    )
+    assert s.workflow == "patch"  # story override beats epic default
 
 
 STORY_TEXT = """---
