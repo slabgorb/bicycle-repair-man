@@ -1,8 +1,6 @@
 """Tests for the Epic data model and lifecycle."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 
 from lib import epic as _epic
@@ -72,3 +70,13 @@ def test_spec_approval_parsed_when_present():
     assert e.spec_approval.required is True
     assert e.spec_approval.approved_at == "2026-05-19T14:22:00Z"
     assert e.spec_approval.approver == "keith"
+
+
+def test_spec_approval_normalizes_offset_datetime():
+    with_offset = EPIC_TEXT.replace(
+        "created: 2026-05-19\n",
+        "created: 2026-05-19\nspec_approval:\n  required: true\n  approved_at: 2026-05-19T16:22:00+02:00\n  approver: keith\n",
+    )
+    e = _epic.parse_epic_text(with_offset)
+    assert e.spec_approval is not None
+    assert e.spec_approval.approved_at == "2026-05-19T14:22:00Z"

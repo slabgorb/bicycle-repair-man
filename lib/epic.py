@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -126,6 +125,8 @@ def _normalize_datetime_str(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc)
         return value.strftime("%Y-%m-%dT%H:%M:%SZ")
     return str(value)
 
