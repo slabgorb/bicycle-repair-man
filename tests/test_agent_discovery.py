@@ -98,3 +98,25 @@ def test_tactical_template_parses_and_has_required_tags():
     text = (Path(__file__).resolve().parent.parent / "agents" / "templates" / "tactical.md").read_text()
     a = _agent.parse_agent_text(text, name="template-tactical")
     assert a.kind == "tactical"
+
+
+def test_all_six_built_in_roles_have_agent_files():
+    from pathlib import Path
+    agents_dir = Path(__file__).resolve().parent.parent / "agents"
+    for name in ("architect", "pm", "tea", "dev", "reviewer", "tech-writer"):
+        f = agents_dir / f"{name}.md"
+        assert f.is_file(), f"missing agent file: {f}"
+        a = _agent.parse_agent_text(f.read_text(), name=name)
+        assert a.kind in ("strategic", "tactical")
+
+
+def test_command_wrappers_are_thin_and_marked():
+    from pathlib import Path
+    cmd_dir = Path(__file__).resolve().parent.parent / "commands"
+    for name in ("architect", "pm", "tea", "dev", "reviewer", "tech-writer"):
+        text = (cmd_dir / f"{name}.md").read_text()
+        assert "brm-role: true" in text
+        assert "brm-agent:" in text or name in text  # references the agent
+        # Wrapper should be small (no full role description)
+        body = text.split("---", 2)[-1] if text.startswith("---") else text
+        assert len(body.splitlines()) < 50, "wrapper should be thin"
